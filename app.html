@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>프리미엄 셀프 메뉴판</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@100;400;700&display=swap');
+        :root {
+            --background: #0d0d0d;
+            --primary: #c29958; /* 골드톤 */
+        }
+        body { font-family: 'Geist', sans-serif; background-color: var(--background); color: white; }
+        .card { background: #1a1a1a; border: 1px solid #333; border-radius: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- 초기 데이터 및 설정 ---
+        const DEFAULT_MENU = [
+            { id: "1", nameKo: "맥칼란 25년산", nameEn: "Macallan 25Y", category: "whisky", priceKRW: 450000, descKo: "싱글 몰트 위스키", image: "https://images.unsplash.com/photo-1599411221003-8d650172e964?auto=format&fit=crop&q=80&w=400" },
+            { id: "2", nameKo: "하이네켄", nameEn: "Heineken", category: "beer", priceKRW: 18000, descKo: "프리미엄 라거", image: "https://images.unsplash.com/photo-1618885472179-5e444a99df91?auto=format&fit=crop&q=80&w=400" }
+        ];
+
+        // --- 앱 메인 컴포넌트 ---
+        function App() {
+            const [view, setView] = useState('user'); // 'user', 'adminLogin', 'adminDash'
+            const [lang, setLang] = useState('ko');
+            const [menuItems, setMenuItems] = useState(() => {
+                const saved = localStorage.getItem("menuItems");
+                return saved ? JSON.parse(saved) : DEFAULT_MENU;
+            });
+            const [cart, setCart] = useState([]);
+
+            // 데이터 동기화
+            useEffect(() => {
+                localStorage.setItem("menuItems", JSON.stringify(menuItems));
+            }, [menuItems]);
+
+            // 로그인 체크
+            useEffect(() => {
+                const auth = localStorage.getItem("adminAuth");
+                if (auth === "true" && view === 'adminLogin') setView('adminDash');
+            }, []);
+
+            // --- 뷰 렌더링 함수 ---
+            const renderUserMenu = () => (
+                <div className="max-w-4xl mx-auto p-4">
+                    <header className="flex justify-between items-center py-6">
+                        <div>
+                            <h1 className="text-3xl font-bold text-yellow-600">PREMIUM MENU</h1>
+                            <p className="text-gray-400">최고의 음료를 경험하세요</p>
+                        </div>
+                        <button onClick={() => setView('adminLogin')} className="text-xs text-gray-500 hover:text-white border border-gray-700 px-2 py-1 rounded">Admin</button>
+                    </header>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+                        {menuItems.map(item => (
+                            <div key={item.id} className="card overflow-hidden">
+                                <img src={item.image || "/placeholder.svg"} className="w-full h-48 object-cover opacity-80" />
+                                <div className="p-4">
+                                    <h3 className="text-xl font-bold">{item[lang === 'ko' ? 'nameKo' : 'nameEn']}</h3>
+                                    <p className="text-gray-500 text-sm mt-1">{item.descKo}</p>
+                                    <div className="mt-4 flex justify-between items-center">
+                                        <span className="text-yellow-500 font-bold">₩{item.priceKRW.toLocaleString()}</span>
+                                        <button className="bg-yellow-600 text-black px-4 py-1 rounded-full text-sm font-bold" onClick={() => alert('장바구니에 담겼습니다')}>Add to Cart</button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            const renderAdminLogin = () => (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="card w-full max-w-md p-8">
+                        <h2 className="text-2xl font-bold mb-4 text-yellow-600">관리자 로그인</h2>
+                        <p className="text-gray-400 mb-6 text-sm">암호: admin123</p>
+                        <input type="password" id="pw" className="w-full bg-black border border-gray-700 rounded p-3 mb-4 focus:border-yellow-600 outline-none" placeholder="비밀번호" />
+                        <button onClick={() => {
+                            const val = document.getElementById('pw').value;
+                            if(val === 'admin123') {
+                                localStorage.setItem("adminAuth", "true");
+                                setView('adminDash');
+                            } else alert('틀렸습니다.');
+                        }} className="w-full bg-yellow-600 text-black font-bold py-3 rounded">Login</button>
+                        <button onClick={() => setView('user')} className="w-full mt-4 text-gray-400 text-sm underline">홈으로 돌아가기</button>
+                    </div>
+                </div>
+            );
+
+            const renderAdminDash = () => (
+                <div className="max-w-5xl mx-auto p-4">
+                    <div className="flex justify-between items-center py-6 border-b border-gray-800 mb-8">
+                        <h1 className="text-2xl font-bold">Dashboard</h1>
+                        <div className="flex gap-2">
+                            <button onClick={() => setView('user')} className="bg-gray-800 px-4 py-2 rounded">Home</button>
+                            <button onClick={() => { localStorage.removeItem("adminAuth"); setView('user'); }} className="bg-red-900 px-4 py-2 rounded">Logout</button>
+                        </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 gap-4">
+                        <h2 className="text-lg font-bold">메뉴 목록 편집</h2>
+                        {menuItems.map(item => (
+                            <div key={item.id} className="card p-4 flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <img src={item.image || "/placeholder.svg"} className="w-12 h-12 rounded object-cover" />
+                                    <span>{item.nameKo} (₩{item.priceKRW.toLocaleString()})</span>
+                                </div>
+                                <button onClick={() => {
+                                    if(confirm('삭제하시겠습니까?')) setMenuItems(menuItems.filter(m => m.id !== item.id));
+                                }} className="text-red-500 text-sm">Delete</button>
+                            </div>
+                        ))}
+                        <button onClick={() => alert('새 메뉴 추가 팝업 기능은 통합 데모에서 제외되었습니다. 코드를 확장하여 구현 가능합니다.')} className="w-full border-2 border-dashed border-gray-700 py-4 text-gray-500 rounded-lg hover:border-yellow-600">+ 메뉴 추가</button>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div>
+                    {view === 'user' && renderUserMenu()}
+                    {view === 'adminLogin' && renderAdminLogin()}
+                    {view === 'adminDash' && renderAdminDash()}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
