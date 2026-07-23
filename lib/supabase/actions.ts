@@ -2,10 +2,22 @@
 
 import { createClient } from "./client"
 import { appCategoryToDb, appMenuItemToDb } from "@/hooks/use-realtime-menu"
+import { isSuperAdmin } from "@/lib/admin-session"
+
+// RBAC guard for every menu/category/modifier mutation. These writes run through
+// the browser client, so we block any non-super-admin session from mutating.
+// (For defense-in-depth at the database layer, enable Supabase RLS so the anon
+// key cannot write these tables directly.)
+function assertCanWrite(action: string) {
+  if (!isSuperAdmin()) {
+    throw new Error(`권한 없음: '${action}' 작업은 최고 관리자만 수행할 수 있습니다.`)
+  }
+}
 
 // Category Actions
 export async function addCategory(category: any, sortOrder: number = 0) {
   try {
+    assertCanWrite("카테고리 추가")
     const supabase = createClient()
     
     if (!supabase) {
@@ -34,6 +46,7 @@ export async function addCategory(category: any, sortOrder: number = 0) {
 
 export async function updateCategory(id: string, category: any) {
   try {
+    assertCanWrite("카테고리 수정")
     const supabase = createClient()
     
     if (!supabase) {
@@ -63,6 +76,7 @@ export async function updateCategory(id: string, category: any) {
 
 export async function deleteCategory(id: string) {
   try {
+    assertCanWrite("카테고리 삭제")
     const supabase = createClient()
     
     if (!supabase) {
@@ -87,6 +101,7 @@ export async function deleteCategory(id: string) {
 
 export async function updateCategoryOrder(categories: any[]) {
   try {
+    assertCanWrite("카테고리 순서 변경")
     const supabase = createClient()
     
     if (!supabase) {
@@ -124,6 +139,7 @@ export async function updateCategoryOrder(categories: any[]) {
 // Menu Item Actions
 export async function addMenuItem(menuItem: any, sortOrder: number = 0) {
   try {
+    assertCanWrite("메뉴 추가")
     const supabase = createClient()
     
     if (!supabase) {
@@ -158,6 +174,7 @@ export async function addMenuItem(menuItem: any, sortOrder: number = 0) {
 
 export async function updateMenuItem(id: string, menuItem: any) {
   try {
+    assertCanWrite("메뉴 수정")
     const supabase = createClient()
     
     if (!supabase) {
@@ -214,6 +231,7 @@ export async function updateMenuItem(id: string, menuItem: any) {
 
 export async function deleteMenuItem(id: string) {
   try {
+    assertCanWrite("메뉴 삭제")
     const supabase = createClient()
     
     if (!supabase) {
@@ -285,6 +303,7 @@ export async function getMenuModifiers(menuItemId: string) {
 
 export async function addMenuModifier(modifier: any) {
   try {
+    assertCanWrite("모디파이어 추가")
     const supabase = createClient()
     
     if (!supabase) {
@@ -312,6 +331,7 @@ export async function addMenuModifier(modifier: any) {
 
 export async function updateMenuModifier(id: string, modifier: any) {
   try {
+    assertCanWrite("모디파이어 수정")
     const supabase = createClient()
     
     if (!supabase) {
@@ -340,6 +360,7 @@ export async function updateMenuModifier(id: string, modifier: any) {
 
 export async function deleteMenuModifier(id: string) {
   try {
+    assertCanWrite("모디파이어 삭제")
     const supabase = createClient()
     
     if (!supabase) {
@@ -364,6 +385,7 @@ export async function deleteMenuModifier(id: string) {
 
 export async function addModifierOption(option: any) {
   try {
+    assertCanWrite("옵션 추가")
     const supabase = createClient()
     
     if (!supabase) {
@@ -391,6 +413,7 @@ export async function addModifierOption(option: any) {
 
 export async function updateModifierOption(id: string, option: any) {
   try {
+    assertCanWrite("옵션 수정")
     const supabase = createClient()
     
     if (!supabase) {
@@ -419,6 +442,7 @@ export async function updateModifierOption(id: string, option: any) {
 
 export async function deleteModifierOption(id: string) {
   try {
+    assertCanWrite("옵션 삭제")
     const supabase = createClient()
     
     if (!supabase) {
