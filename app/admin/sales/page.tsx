@@ -1,11 +1,11 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { Calendar, TrendingUp, CreditCard, Banknote, ArrowLeft, Printer, Trash2, FileSpreadsheet } from "lucide-react"
 import Link from "next/link"
 import DeleteConfirmationPopup from "@/components/delete-confirmation-popup"
 import { adminTranslations, type AdminLanguage } from "@/lib/admin-translations"
+import { adminFetch, getAdminRole } from "@/lib/admin-session"
 
 interface SalesRecord {
   id: number
@@ -29,6 +29,21 @@ interface SalesRecord {
 
 type TabType = "daily" | "monthly"
 
+// Fetch sales_records through the server route (/api/sales). The server reads
+// Supabase credentials from RUNTIME env vars, so this works on any host even when
+// the build-time NEXT_PUBLIC_* values were missing/stale (the Netlify failure mode).
+async function fetchSalesRecords(from: string, to: string): Promise<any[]> {
+  const params = new URLSearchParams({ resource: "sales_records", from, to })
+  const res = await fetch(`/api/sales?${params.toString()}`, { cache: "no-store" })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    console.error("[v0] Failed to fetch sales:", res.status, err?.error)
+    return []
+  }
+  const body = await res.json().catch(() => ({}))
+  return body?.data ?? []
+}
+
 export default function SalesDashboardPage() {
   const [activeTab, setActiveTab] = useState<TabType>("daily")
   const [salesData, setSalesData] = useState<SalesRecord[]>([])
@@ -36,6 +51,9 @@ export default function SalesDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<SalesRecord | null>(null)
   const [adminLanguage, setAdminLanguage] = useState<AdminLanguage>("ko")
+  // RBAC: only super_admin may delete sales records. Resolved after mount so the
+  // localStorage-backed role is available (avoids SSR/hydration mismatch).
+  const [canWrite, setCanWrite] = useState(false)
   const printRef = useRef<HTMLDivElement>(null)
   
   // Get translations
@@ -57,44 +75,28 @@ export default function SalesDashboardPage() {
     if (savedLang && adminTranslations[savedLang]) {
       setAdminLanguage(savedLang)
     }
+    setCanWrite(getAdminRole() === "super_admin")
   }, [])
 
   // Fetch sales data for the selected date/month
   useEffect(() => {
     const fetchSales = async () => {
       setLoading(true)
-      const supabase = createClient()
-      if (!supabase) {
-        setLoading(false)
-        return
-      }
 
-      let query = supabase
-        .from("sales_records")
-        .select("*")
-        .order("created_at", { ascending: false })
-
+      let from: string
+      let to: string
       if (activeTab === "daily") {
-        // Filter by specific date
-        const startOfDay = `${selectedDate}T00:00:00`
-        const endOfDay = `${selectedDate}T23:59:59`
-        query = query.gte("created_at", startOfDay).lte("created_at", endOfDay)
+        from = `${selectedDate}T00:00:00`
+        to = `${selectedDate}T23:59:59`
       } else {
-        // Filter by month
         const [year, month] = selectedMonth.split("-")
-        const startOfMonth = `${year}-${month}-01T00:00:00`
+        from = `${year}-${month}-01T00:00:00`
         const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate()
-        const endOfMonth = `${year}-${month}-${lastDay}T23:59:59`
-        query = query.gte("created_at", startOfMonth).lte("created_at", endOfMonth)
+        to = `${year}-${month}-${lastDay}T23:59:59`
       }
 
-      const { data, error } = await query
-
-      if (error) {
-        console.error("Failed to fetch sales:", error)
-      } else {
-        setSalesData(data || [])
-      }
+      const data = await fetchSalesRecords(from, to)
+      setSalesData(data as SalesRecord[])
       setLoading(false)
     }
 
@@ -104,25 +106,14 @@ export default function SalesDashboardPage() {
   // Fetch monthly cumulative data (MTD) for the daily tab header
   useEffect(() => {
     const fetchMonthlyCumulative = async () => {
-      const supabase = createClient()
-      if (!supabase) return
-
       // Get the month from selectedDate
       const [year, month] = selectedDate.split("-")
       const startOfMonth = `${year}-${month}-01T00:00:00`
       // Up to the end of the selected date (current moment for that day)
       const endOfSelectedDate = `${selectedDate}T23:59:59`
 
-      const { data, error } = await supabase
-        .from("sales_records")
-        .select("*")
-        .gte("created_at", startOfMonth)
-        .lte("created_at", endOfSelectedDate)
-        .order("created_at", { ascending: true })
-
-      if (!error && data) {
-        setMonthlyAllData(data)
-      }
+      const data = await fetchSalesRecords(startOfMonth, endOfSelectedDate)
+      setMonthlyAllData(data as SalesRecord[])
     }
 
     if (activeTab === "daily") {
@@ -258,33 +249,23 @@ export default function SalesDashboardPage() {
     })
   }
 
-  // Re-fetch function to sync all data from Supabase
+  // Re-fetch function to sync all data from the server route
   const refetchAllData = async () => {
-    const supabase = createClient()
-    if (!supabase) return
-
     // Fetch data for the current view (daily or monthly)
-    let query = supabase
-      .from("sales_records")
-      .select("*")
-      .order("created_at", { ascending: false })
-
+    let from: string
+    let to: string
     if (activeTab === "daily") {
-      const startOfDay = `${selectedDate}T00:00:00`
-      const endOfDay = `${selectedDate}T23:59:59`
-      query = query.gte("created_at", startOfDay).lte("created_at", endOfDay)
+      from = `${selectedDate}T00:00:00`
+      to = `${selectedDate}T23:59:59`
     } else {
       const [year, month] = selectedMonth.split("-")
-      const startOfMonth = `${year}-${month}-01T00:00:00`
+      from = `${year}-${month}-01T00:00:00`
       const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate()
-      const endOfMonth = `${year}-${month}-${lastDay}T23:59:59`
-      query = query.gte("created_at", startOfMonth).lte("created_at", endOfMonth)
+      to = `${year}-${month}-${lastDay}T23:59:59`
     }
 
-    const { data, error } = await query
-    if (!error && data) {
-      setSalesData(data)
-    }
+    const data = await fetchSalesRecords(from, to)
+    setSalesData(data as SalesRecord[])
 
     // Also refetch monthly cumulative data if on daily tab
     if (activeTab === "daily") {
@@ -292,60 +273,41 @@ export default function SalesDashboardPage() {
       const startOfMonth = `${year}-${month}-01T00:00:00`
       const endOfSelectedDate = `${selectedDate}T23:59:59`
 
-      const { data: monthlyData, error: monthlyError } = await supabase
-        .from("sales_records")
-        .select("*")
-        .gte("created_at", startOfMonth)
-        .lte("created_at", endOfSelectedDate)
-        .order("created_at", { ascending: true })
-
-      if (!monthlyError && monthlyData) {
-        setMonthlyAllData(monthlyData)
-      }
+      const monthlyData = await fetchSalesRecords(startOfMonth, endOfSelectedDate)
+      setMonthlyAllData(monthlyData as SalesRecord[])
     }
   }
 
   // Delete handler for individual transaction
   const handleDeleteRecord = async (record: SalesRecord) => {
+    if (!canWrite) return // RBAC: read-only managers cannot delete records
     // Open the custom delete confirmation popup
     setDeleteTarget(record)
   }
 
   // Actual delete execution after confirmation
   const executeDelete = async () => {
+    if (!canWrite) return // RBAC: read-only managers cannot delete records
     if (!deleteTarget) {
       return
     }
 
-    const supabase = createClient()
-    if (!supabase) {
-      return
-    }
-
-    // Use bill_id if available, otherwise use record id
+    // Use bill_id if available, otherwise use record id. Delete via the server
+    // route so it targets the same live DB the writes/reads now use.
     const targetBillId = deleteTarget.bill_id
     const targetRecordId = deleteTarget.id
-    
-    let deleteError = null
-    
-    // If bill_id exists, delete by bill_id
+
+    const params = new URLSearchParams()
     if (targetBillId !== null && targetBillId !== undefined) {
-      const { error } = await supabase
-        .from("sales_records")
-        .delete()
-        .eq("bill_id", targetBillId)
-      deleteError = error
+      params.set("billId", String(targetBillId))
     } else {
-      // Fallback: delete by record id
-      const { error } = await supabase
-        .from("sales_records")
-        .delete()
-        .eq("id", targetRecordId)
-      deleteError = error
+      params.set("id", String(targetRecordId))
     }
 
-    if (deleteError) {
-      console.error("Supabase delete error:", deleteError)
+    const res = await adminFetch(`/api/sales?${params.toString()}`, { method: "DELETE" })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      console.error("[v0] Sales delete error:", res.status, err?.error)
       return
     }
     
@@ -776,13 +738,15 @@ export default function SalesDashboardPage() {
                               >
                                 {record.payment_method === "cash" ? t.cash : t.card}
                               </span>
-                              <button
-                                onClick={() => handleDeleteRecord(record)}
-                                className="px-2 py-1 rounded-lg bg-red-900/50 text-red-400 hover:bg-red-800/70 transition-colors text-xs font-medium flex items-center gap-1"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                {t.deleteRecord}
-                              </button>
+                              {canWrite && (
+                                <button
+                                  onClick={() => handleDeleteRecord(record)}
+                                  className="px-2 py-1 rounded-lg bg-red-900/50 text-red-400 hover:bg-red-800/70 transition-colors text-xs font-medium flex items-center gap-1"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  {t.deleteRecord}
+                                </button>
+                              )}
                             </div>
                           </div>
 

@@ -24,6 +24,7 @@ import StaffPayrollReport from "@/components/admin/staff-payroll-report"
 import OptionGroupManager from "@/components/admin/option-group-manager"
 import ItemStatisticsReport from "@/components/admin/item-statistics-report"
 import { initializeAllTables } from "@/lib/supabase/initialize-managers-table"
+import { clearAdminSession, getAdminRole } from "@/lib/admin-session"
 
 // 직원 정산 탭 라벨 (관리자 언어별)
 const payrollTabLabels: Record<AdminLanguage, string> = {
@@ -45,6 +46,10 @@ export default function AdminPage() {
   const [adminLanguage, setAdminLanguage] = useState<AdminLanguage>("ko")
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  // RBAC: only a super admin may create/update/delete. Managers are read-only.
+  // AdminPage renders the role provider (inside AuthGuard) in its own JSX, so it
+  // reads the role directly rather than via the context hook.
+  const [canWrite, setCanWrite] = useState(false)
   
   // Supabase 환경 변수가 설정되어 있으면 항상 Supabase 사용 (빈 테이블이어도)
   const [isSupabaseEnabled, setIsSupabaseEnabled] = useState(false)
@@ -69,6 +74,8 @@ export default function AdminPage() {
   }, [])
 
   useEffect(() => {
+    setCanWrite(getAdminRole() === "super_admin")
+
     const savedAdminLang = localStorage.getItem("adminLanguage") as AdminLanguage
     if (savedAdminLang && adminTranslations[savedAdminLang]) {
       setAdminLanguage(savedAdminLang)
@@ -92,6 +99,7 @@ export default function AdminPage() {
   }
 
   const handleAddItem = async (rawItem: any) => {
+    if (!canWrite) return // RBAC: managers cannot create/update
     // Determine if this is an edit or add operation based on item.id
     const isEditing = editingId || (rawItem.id && menuItems.some(m => m.id === rawItem.id))
     const itemId = editingId || rawItem.id || Date.now().toString()
@@ -158,11 +166,13 @@ export default function AdminPage() {
   }
 
   const handleEdit = (id: string) => {
+    if (!canWrite) return // RBAC: managers cannot edit
     setEditingId(id)
     setIsFormOpen(true)
   }
 
   const handleDelete = async (id: string) => {
+    if (!canWrite) return // RBAC: managers cannot delete
     if (confirm(t.confirmDelete)) {
       setSaveError(null)
       if (isSupabaseEnabled) {
@@ -191,7 +201,7 @@ export default function AdminPage() {
   }
 
   const handleLogout = () => {
-    localStorage.removeItem("adminAuth")
+    clearAdminSession()
     router.push("/admin/login")
   }
 
@@ -252,7 +262,18 @@ export default function AdminPage() {
           <div className="max-w-7xl mx-auto px-4 py-6">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-3xl font-bold text-primary">{t.adminDashboard}</h1>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-3xl font-bold text-primary">{t.adminDashboard}</h1>
+                  <span
+                    className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
+                      canWrite
+                        ? "bg-primary/10 text-primary border-primary/30"
+                        : "bg-amber-500/10 text-amber-600 border-amber-500/30"
+                    }`}
+                  >
+                    {canWrite ? "최고 관리자" : "매니저 (읽기 전용)"}
+                  </span>
+                </div>
                 <p className="text-muted-foreground text-sm mt-1">{t.menuCategoryManagement}</p>
               </div>
               <div className="flex gap-4 items-center">
@@ -315,14 +336,16 @@ export default function AdminPage() {
 
         <div className="max-w-7xl mx-auto px-4 py-8">
           <Tabs defaultValue="menu" className="w-full">
-            <TabsList className="grid w-full grid-cols-10">
+            {/* RBAC: the "managers" (account admin) tab is hidden entirely for
+                read-only managers, so the grid column count adjusts accordingly. */}
+            <TabsList className={`grid w-full ${canWrite ? "grid-cols-10" : "grid-cols-9"}`}>
               <TabsTrigger value="menu">{t.menuManagement}</TabsTrigger>
               <TabsTrigger value="category">{t.categoryManagement}</TabsTrigger>
               <TabsTrigger value="optionGroups">콤보 옵션</TabsTrigger>
               <TabsTrigger value="itemStats">품목별 통계</TabsTrigger>
               <TabsTrigger value="promotion">{t.promotion}</TabsTrigger>
               <TabsTrigger value="exchange">{t.exchangeRate}</TabsTrigger>
-              <TabsTrigger value="managers">{t.managers}</TabsTrigger>
+              {canWrite && <TabsTrigger value="managers">{t.managers}</TabsTrigger>}
               <TabsTrigger value="priceLog">{t.priceLog}</TabsTrigger>
               <TabsTrigger value="payroll">{payrollTabLabels[adminLanguage]}</TabsTrigger>
               <TabsTrigger value="settings">{t.pageSettings}</TabsTrigger>
@@ -381,11 +404,13 @@ export default function AdminPage() {
               <ExchangeRateManager language={adminLanguage} />
             </TabsContent>
 
-            <TabsContent value="managers">
-              <div className="space-y-4">
-                {mounted ? <ManagersManagement /> : <div className="p-8 text-center text-muted-foreground">Loading...</div>}
-              </div>
-            </TabsContent>
+            {canWrite && (
+              <TabsContent value="managers">
+                <div className="space-y-4">
+                  {mounted ? <ManagersManagement /> : <div className="p-8 text-center text-muted-foreground">Loading...</div>}
+                </div>
+              </TabsContent>
+            )}
 
             <TabsContent value="priceLog">
               <div className="space-y-4">
