@@ -8,6 +8,7 @@ import AddMenuModal from "./add-menu-modal"
 import { currencies } from "@/lib/currencies"
 import { adminTranslations } from "@/lib/admin-translations"
 import { useRealtimeCategories } from "@/hooks/use-realtime-menu"
+import { useAdminRole } from "@/components/admin/role-context"
 
 interface MenuItemData {
   id: string
@@ -52,6 +53,7 @@ export default function AdminMenuManager({
   language = "ko",
 }: AdminMenuManagerProps) {
   const t = adminTranslations[language as keyof typeof adminTranslations]
+  const { canWrite } = useAdminRole()
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [localCategories, setLocalCategories] = useState<Record<string, any>[]>([])
@@ -148,14 +150,16 @@ export default function AdminMenuManager({
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-foreground">{t.selectCategory}</h2>
-        <div className="flex gap-2">
-          <Button onClick={() => setIsModalOpen(true)} className="bg-[#FF8C00] hover:bg-[#E67E00] text-white">
-            + {t.addNewMenu}
-          </Button>
-          <Button onClick={() => setIsFormOpen(!isFormOpen)} variant="outline">
-            {isFormOpen ? t.closeForm : t.addNewMenu + " (Form)"}
-          </Button>
-        </div>
+        {canWrite && (
+          <div className="flex gap-2">
+            <Button onClick={() => setIsModalOpen(true)} className="bg-[#FF8C00] hover:bg-[#E67E00] text-white">
+              + {t.addNewMenu}
+            </Button>
+            <Button onClick={() => setIsFormOpen(!isFormOpen)} variant="outline">
+              {isFormOpen ? t.closeForm : t.addNewMenu + " (Form)"}
+            </Button>
+          </div>
+        )}
       </div>
 
       <AddMenuModal
@@ -182,6 +186,7 @@ export default function AdminMenuManager({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {canWrite && (
         <div className="lg:col-span-1">
           <Card className="sticky top-4">
             <CardHeader>
@@ -214,8 +219,9 @@ export default function AdminMenuManager({
             </CardContent>
           </Card>
         </div>
+        )}
 
-        <div className="lg:col-span-2">
+        <div className={canWrite ? "lg:col-span-2" : "lg:col-span-3"}>
           <Card>
             <CardHeader>
               <CardTitle>{`${t.menuItems} (${filteredItems.length}개)`}</CardTitle>
@@ -260,7 +266,7 @@ export default function AdminMenuManager({
                         </p>
                       </div>
 
-                      {hoverItemId === item.id && (
+                      {canWrite && hoverItemId === item.id && (
                         <div className="absolute inset-0 bg-black/60 flex items-center justify-center gap-2 rounded-lg">
                           <Button
                             size="sm"

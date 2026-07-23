@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { currencies } from "@/lib/currencies"
 import { getCustomRates, updateCustomRate, deleteCustomRate } from "@/lib/custom-exchange-rates"
 import { adminTranslations } from "@/lib/admin-translations"
+import { useAdminRole } from "@/components/admin/role-context"
 
 interface ExchangeRateManagerProps {
   language?: string
@@ -15,6 +16,7 @@ interface ExchangeRateManagerProps {
 
 export default function ExchangeRateManager({ language = "ko" }: ExchangeRateManagerProps) {
   const t = adminTranslations[language as keyof typeof adminTranslations]
+  const { canWrite } = useAdminRole()
   const [customRates, setCustomRatesState] = useState<Record<string, number>>({})
   const [mounted, setMounted] = useState(false)
   const [editingCurrency, setEditingCurrency] = useState<string | null>(null)
@@ -28,6 +30,7 @@ export default function ExchangeRateManager({ language = "ko" }: ExchangeRateMan
   }, [])
 
   const handleAddRate = (currency: string) => {
+    if (!canWrite) return // RBAC: read-only managers cannot change rates
     if (editingRate && !isNaN(Number.parseFloat(editingRate))) {
       const rate = Number.parseFloat(editingRate)
       updateCustomRate(currency, rate)
@@ -43,6 +46,7 @@ export default function ExchangeRateManager({ language = "ko" }: ExchangeRateMan
   }
 
   const handleDeleteRate = (currency: string) => {
+    if (!canWrite) return // RBAC: read-only managers cannot delete rates
     deleteCustomRate(currency)
     setCustomRatesState((prev) => {
       const updated = { ...prev }
@@ -83,9 +87,11 @@ export default function ExchangeRateManager({ language = "ko" }: ExchangeRateMan
                             {t.example}: 450,000 KRW = {Math.round(450000 * rate).toLocaleString()}
                           </p>
                         </div>
-                        <Button variant="destructive" size="sm" onClick={() => handleDeleteRate(currency)}>
-                          {t.delete}
-                        </Button>
+                        {canWrite && (
+                          <Button variant="destructive" size="sm" onClick={() => handleDeleteRate(currency)}>
+                            {t.delete}
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -93,6 +99,7 @@ export default function ExchangeRateManager({ language = "ko" }: ExchangeRateMan
               </div>
             )}
 
+            {canWrite && (
             <div className="space-y-3 border-t border-border pt-6">
               <h3 className="font-semibold text-lg">{t.addEditRate}</h3>
               <div className="space-y-4">
@@ -146,6 +153,7 @@ export default function ExchangeRateManager({ language = "ko" }: ExchangeRateMan
                 ))}
               </div>
             </div>
+            )}
 
             {saved && (
               <div className="p-4 bg-green-100 border border-green-300 rounded-lg text-green-800">

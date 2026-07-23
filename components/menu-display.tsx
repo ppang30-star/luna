@@ -330,24 +330,20 @@ export default function MenuDisplay({ categories, menuItems: propMenuItems, setC
   }
 
   const getCategoryName = (category: Category): string => {
-    switch (language) {
-      case "ko":
-        return category.ko
-      case "en":
-        return category.en
-      case "ja":
-        return category.ja
-      case "zh":
-        return category.zh
-      case "es":
-        return category.es
-      case "th":
-        return category.th
-      case "vi":
-        return category.vi
-      default:
-        return category.ko
-    }
+    // 1) Use the category's own translated field for the active language when present.
+    //    (Categories may not carry every language — e.g. Hindi is not stored on the object.)
+    const direct = (category as unknown as Record<string, string | undefined>)[language]
+    if (direct && direct.trim()) return direct
+
+    // 2) Fall back to the shared translation dictionary keyed by category id.
+    //    Category ids are plural (e.g. "spirits") while the dictionary uses singular
+    //    keys (e.g. "spirit"), so normalize by stripping a trailing "s".
+    const dictKey = category.id.replace(/s$/, "") as keyof typeof t.categories
+    const dictName = t.categories?.[dictKey]
+    if (dictName) return dictName
+
+    // 3) Last resort: Korean, then English.
+    return category.ko || category.en || ""
   }
 
   const getMenuName = (item: MenuItemData | null | undefined): string => {

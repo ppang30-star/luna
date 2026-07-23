@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -62,18 +61,24 @@ export default function ItemStatisticsReport() {
   // 메뉴 ID → 카테고리 매핑 (상위 메뉴의 음식 여부 판별용). 최초 1회 로드.
   useEffect(() => {
     const fetchCategories = async () => {
-      const supabase = createClient()
-      if (!supabase) return
-      const { data, error } = await supabase.from("menu_items").select("id, category")
-      if (error) {
-        console.error("[v0] 카테고리 로드 실패:", error)
-        return
+      try {
+        // Reuse the runtime server route that already serves menu data. This avoids
+        // the build-time NEXT_PUBLIC_* browser client entirely.
+        const res = await fetch("/api/menu", { cache: "no-store" })
+        if (!res.ok) {
+          console.error("[v0] 카테고리 로드 실패:", res.status)
+          return
+        }
+        const body = await res.json().catch(() => ({}))
+        const items: any[] = body?.menuItems ?? []
+        const map: Record<string, string> = {}
+        for (const item of items) {
+          if (item?.id != null) map[String(item.id)] = item.category
+        }
+        setCategoryMap(map)
+      } catch (err) {
+        console.error("[v0] 카테고리 로드 중 오류:", err)
       }
-      const map: Record<string, string> = {}
-      for (const item of data ?? []) {
-        if (item?.id != null) map[String(item.id)] = item.category
-      }
-      setCategoryMap(map)
     }
     fetchCategories()
   }, [])
@@ -82,11 +87,6 @@ export default function ItemStatisticsReport() {
   useEffect(() => {
     const fetchLines = async () => {
       setLoading(true)
-      const supabase = createClient()
-      if (!supabase) {
-        setLoading(false)
-        return
-      }
 
       let start: string
       let end: string
@@ -100,20 +100,16 @@ export default function ItemStatisticsReport() {
         end = `${nextMonth}-01T00:00:00`
       }
 
-      const { data, error } = await supabase
-        .from("sale_line_items")
-        .select(
-          "id, created_at, line_type, parent_menu_id, parent_name_ko, parent_name_en, combo_group_ko, item_name_ko, item_name_en, quantity, unit_price",
-        )
-        .gte("created_at", start)
-        .lt("created_at", end)
-        .order("created_at", { ascending: false })
-
-      if (error) {
-        console.error("[v0] sale_line_items 조회 실패:", error)
+      // Half-open range [start, end): `end` maps to an exclusive `lt` filter server-side.
+      const params = new URLSearchParams({ resource: "sale_line_items", from: start, toExclusive: end })
+      const res = await fetch(`/api/sales?${params.toString()}`, { cache: "no-store" })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.error("[v0] sale_line_items 조회 실패:", res.status, err?.error)
         setRows([])
       } else {
-        setRows((data ?? []) as RawLineItem[])
+        const body = await res.json().catch(() => ({}))
+        setRows((body?.data ?? []) as RawLineItem[])
       }
       setLoading(false)
     }

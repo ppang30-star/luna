@@ -12,6 +12,7 @@ import { adminTranslations } from "@/lib/admin-translations"
 import { useRealtimeCategories, useRealtimeMenuItems } from "@/hooks/use-realtime-menu"
 import { addCategory, updateCategory, deleteCategory, updateCategoryOrder, addMenuItem, updateMenuItem, deleteMenuItem } from "@/lib/supabase/actions"
 import { isSupabaseConfigured } from "@/lib/supabase/client"
+import { useAdminRole } from "@/components/admin/role-context"
 
 interface Category {
   id: string
@@ -140,6 +141,7 @@ export default function CategoryManager({ onCategoriesChange, language = "ko" }:
   const [mounted, setMounted] = useState(false)
 
   const t = adminTranslations[language as keyof typeof adminTranslations]
+  const { canWrite } = useAdminRole()
 
   // Supabase 환경 변수 확인 (클라이언트에서만 실행)
   useEffect(() => {
@@ -448,9 +450,11 @@ export default function CategoryManager({ onCategoriesChange, language = "ko" }:
                 <CardTitle>{t.categoryManagement}</CardTitle>
                 <CardDescription>{t.categoryManagementDesc}</CardDescription>
               </div>
-              <Button onClick={handleAddCategory} className="bg-primary text-primary-foreground hover:bg-primary/90">
-                {t.addNewCategory}
-              </Button>
+              {canWrite && (
+                <Button onClick={handleAddCategory} className="bg-primary text-primary-foreground hover:bg-primary/90">
+                  {t.addNewCategory}
+                </Button>
+              )}
             </div>
           </CardHeader>
           <CardContent>
@@ -470,25 +474,29 @@ export default function CategoryManager({ onCategoriesChange, language = "ko" }:
                     <TableRow key={category.id}>
                       <TableCell className="text-center font-semibold text-muted-foreground w-16">
                         <div className="flex gap-1 justify-center">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={index === 0}
-                            onClick={() => handleMoveCategory(index, "up")}
-                            className="h-6 w-6 p-0"
-                          >
-                            ↑
-                          </Button>
+                          {canWrite && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={index === 0}
+                              onClick={() => handleMoveCategory(index, "up")}
+                              className="h-6 w-6 p-0"
+                            >
+                              ↑
+                            </Button>
+                          )}
                           <span className="w-6 text-center">{index + 1}</span>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={index === categories.length - 1}
-                            onClick={() => handleMoveCategory(index, "down")}
-                            className="h-6 w-6 p-0"
-                          >
-                            ↓
-                          </Button>
+                          {canWrite && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={index === categories.length - 1}
+                              onClick={() => handleMoveCategory(index, "down")}
+                              className="h-6 w-6 p-0"
+                            >
+                              ↓
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                       {editingCategoryId === category.id ? (
@@ -627,25 +635,31 @@ export default function CategoryManager({ onCategoriesChange, language = "ko" }:
                           </TableCell>
                           <TableCell className="text-center">
                             <div className="flex flex-col items-center gap-1">
-                              <Switch
-                                checked={category.isVisible !== false}
-                                onCheckedChange={(checked) => handleToggleVisibility(category, checked)}
-                                aria-label="카테고리 노출 여부"
-                              />
+                              {canWrite ? (
+                                <Switch
+                                  checked={category.isVisible !== false}
+                                  onCheckedChange={(checked) => handleToggleVisibility(category, checked)}
+                                  aria-label="카테고리 노출 여부"
+                                />
+                              ) : null}
                               <span className="text-xs text-muted-foreground">
                                 {category.isVisible !== false ? "노출" : "숨김"}
                               </span>
                             </div>
                           </TableCell>
                           <TableCell>
-                            <div className="flex gap-2">
-                              <Button size="sm" variant="outline" onClick={() => handleEditCategory(category)}>
-                                수정
-                              </Button>
-                              <Button size="sm" variant="destructive" onClick={() => handleDeleteCategory(category.id)}>
-                                삭제
-                              </Button>
-                            </div>
+                            {canWrite ? (
+                              <div className="flex gap-2">
+                                <Button size="sm" variant="outline" onClick={() => handleEditCategory(category)}>
+                                  수정
+                                </Button>
+                                <Button size="sm" variant="destructive" onClick={() => handleDeleteCategory(category.id)}>
+                                  삭제
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">읽기 전용</span>
+                            )}
                           </TableCell>
                         </>
                       )}
@@ -660,6 +674,7 @@ export default function CategoryManager({ onCategoriesChange, language = "ko" }:
 
       <TabsContent value="menus">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {canWrite && (
           <div className="lg:col-span-1">
             <Card className="sticky top-4">
               <CardHeader>
@@ -698,8 +713,9 @@ export default function CategoryManager({ onCategoriesChange, language = "ko" }:
               </CardContent>
             </Card>
           </div>
+          )}
 
-          <div className="lg:col-span-2 space-y-6">
+          <div className={`${canWrite ? "lg:col-span-2" : "lg:col-span-3"} space-y-6`}>
             <Card>
               <CardHeader>
                 <CardTitle>{t.selectCategory}</CardTitle>
@@ -760,14 +776,16 @@ export default function CategoryManager({ onCategoriesChange, language = "ko" }:
                               <span className="text-lg font-bold text-primary">
                                 ₩{item.priceKRW.toLocaleString("ko-KR")}
                               </span>
-                              <div className="flex gap-2 ml-auto">
-                                <Button size="sm" variant="outline" onClick={() => handleEditMenuItem(item.id)}>
-                                  수정
-                                </Button>
-                                <Button size="sm" variant="destructive" onClick={() => handleDeleteMenuItem(item.id)}>
-                                  삭제
-                                </Button>
-                              </div>
+                          {canWrite && (
+                            <div className="flex gap-2 ml-auto">
+                              <Button size="sm" variant="outline" onClick={() => handleEditMenuItem(item.id)}>
+                                수정
+                              </Button>
+                              <Button size="sm" variant="destructive" onClick={() => handleDeleteMenuItem(item.id)}>
+                                삭제
+                              </Button>
+                            </div>
+                          )}
                             </div>
                           </div>
                         </div>

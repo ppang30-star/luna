@@ -1,274 +1,336 @@
-'use client'
+"use client"
 
-import { useEffect, useState } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Plus, Trash2 } from 'lucide-react'
-import { initializeManagersTable } from '@/lib/supabase/initialize-managers-table'
+import { useCallback, useEffect, useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Plus, Pencil, Trash2, Loader2, ShieldCheck, Eye } from "lucide-react"
+import { adminFetch } from "@/lib/admin-session"
+import { useAdminRole } from "@/components/admin/role-context"
 
-interface Manager {
-  id?: string
+type Role = "manager" | "super_admin"
+
+interface StaffUser {
+  id: string
   name: string
+  login_id: string
   password: string
-  created_at?: string
+  role: Role
+  created_at: string
+}
+
+interface FormState {
+  id: string | null
+  name: string
+  loginId: string
+  password: string
+  role: Role
+}
+
+const EMPTY_FORM: FormState = { id: null, name: "", loginId: "", password: "", role: "manager" }
+
+const ROLE_LABEL: Record<Role, string> = {
+  super_admin: "최고 관리자",
+  manager: "매니저 (읽기 전용)",
 }
 
 export default function ManagersManagement() {
-  const [managers, setManagers] = useState<Manager[]>([])
+  const { canWrite } = useAdminRole()
+  const [users, setUsers] = useState<StaffUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [newName, setNewName] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [isAdding, setIsAdding] = useState(false)
-  const [tableInitialized, setTableInitialized] = useState(false)
 
-  // Format date safely
-  const formatDate = (dateString?: string): string => {
-    if (!dateString) return 'N/A'
-    try {
-      return new Date(dateString).toLocaleDateString()
-    } catch {
-      return dateString
-    }
-  }
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [form, setForm] = useState<FormState>(EMPTY_FORM)
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
-  const initializeTable = async () => {
+  const loadUsers = useCallback(async () => {
+    setLoading(true)
+    setError(null)
     try {
-      console.log('[v0] Initializing managers table...')
-      const success = await initializeManagersTable()
-      if (success) {
-        console.log('[v0] Managers table initialized successfully')
-        setTableInitialized(true)
-        return true
-      } else {
-        console.error('[v0] Failed to initialize managers table')
-        setError('Failed to initialize managers table. Please check your database connection.')
-        setTableInitialized(false)
-        return false
-      }
-    } catch (err) {
-      console.error('[v0] Error initializing table:', err)
-      setError('Error initializing table')
-      setTableInitialized(false)
-      return false
-    }
-  }
-
-  const loadManagers = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const { getManagers } = await import('@/lib/manager-price')
-      const data = await getManagers?.()
-      setManagers(data || [])
-    } catch (err) {
-      console.error('[v0] Error loading managers:', err)
-      setManagers([])
+      const res = await adminFetch("/api/admin/users", { cache: "no-store" })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || "직원 목록을 불러오지 못했습니다.")
+      setUsers(json.users ?? [])
+    } catch (err: any) {
+      setError(err?.message || "직원 목록을 불러오지 못했습니다.")
     } finally {
       setLoading(false)
     }
-  }
-
-  useEffect(() => {
-    const initialize = async () => {
-      // First initialize the table
-      const initialized = await initializeTable()
-      if (initialized) {
-        // Then load managers
-        await loadManagers()
-      }
-    }
-    initialize()
   }, [])
 
-  const handleAddManager = async () => {
-    if (!tableInitialized) {
-      setError('테이블 초기화 중입니다. 잠시만 기다려주세요.')
+  useEffect(() => {
+    loadUsers()
+  }, [loadUsers])
+
+  const openAdd = () => {
+    setForm(EMPTY_FORM)
+    setFormError(null)
+    setDialogOpen(true)
+  }
+
+  const openEdit = (user: StaffUser) => {
+    setForm({
+      id: user.id,
+      name: user.name,
+      loginId: user.login_id,
+      // Password left blank on edit: only overwrites when a new value is typed.
+      password: "",
+      role: user.role,
+    })
+    setFormError(null)
+    setDialogOpen(true)
+  }
+
+  const handleSave = async () => {
+    if (!canWrite) return
+    const name = form.name.trim()
+    const loginId = form.loginId.trim()
+    if (!name || !loginId) {
+      setFormError("이름과 아이디는 필수입니다.")
+      return
+    }
+    if (!form.id && !form.password) {
+      setFormError("새 직원은 비밀번호가 필요합니다.")
       return
     }
 
-    if (!newName.trim() || !newPassword.trim()) {
-      setError('이름과 비밀번호를 모두 입력해주세요.')
-      return
-    }
-
-    if (newPassword.length < 4) {
-      setError('비밀번호는 최소 4자 이상이어야 합니다.')
-      return
-    }
-
-    setIsAdding(true)
-    setError(null)
+    setSaving(true)
+    setFormError(null)
     try {
-      const { upsertManager } = await import('@/lib/manager-price')
-      const result = await upsertManager?.(newName, newPassword)
-      
-      if (result?.success) {
-        setNewName('')
-        setNewPassword('')
-        await loadManagers()
-      } else {
-        const errorMsg = result?.error || '관리자 추가 실패'
-        setError(errorMsg)
-        console.error('[v0] Manager add failed:', errorMsg)
-      }
+      const isEdit = Boolean(form.id)
+      const res = await adminFetch("/api/admin/users", {
+        method: isEdit ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: form.id,
+          name,
+          loginId,
+          password: form.password,
+          role: form.role,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || "저장에 실패했습니다.")
+      setDialogOpen(false)
+      setForm(EMPTY_FORM)
+      await loadUsers()
     } catch (err: any) {
-      const errorMsg = err?.message || String(err) || '알 수 없는 오류'
-      console.error('[v0] Error adding manager:', errorMsg, err)
-      setError(`관리자 추가 오류: ${errorMsg}`)
+      setFormError(err?.message || "저장에 실패했습니다.")
     } finally {
-      setIsAdding(false)
+      setSaving(false)
     }
   }
 
-  const handleDeleteManager = async (name: string) => {
-    if (!confirm(`관리자 "${name}"을(를) 삭제하시겠습니까?`)) return
-
+  const handleDelete = async (user: StaffUser) => {
+    if (!canWrite) return
+    if (!confirm(`직원 "${user.name}" (${user.login_id}) 계정을 삭제하시겠습니까?`)) return
     try {
-      const { deleteManager } = await import('@/lib/manager-price')
-      const result = await deleteManager?.(name)
-      if (result?.success) {
-        await loadManagers()
-      } else {
-        const errorMsg = result?.error || '관리자 삭제 실패'
-        setError(errorMsg)
-        console.error('[v0] Manager delete failed:', errorMsg)
-      }
+      const res = await adminFetch(`/api/admin/users?id=${encodeURIComponent(user.id)}`, {
+        method: "DELETE",
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || "삭제에 실패했습니다.")
+      await loadUsers()
     } catch (err: any) {
-      const errorMsg = err?.message || String(err) || '알 수 없는 오류'
-      console.error('[v0] Error deleting manager:', errorMsg, err)
-      setError(`관리자 삭제 오류: ${errorMsg}`)
+      alert(err?.message || "삭제에 실패했습니다.")
     }
   }
 
   return (
-    <div className="space-y-6">
-      {/* Add Manager Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle>관리자 추가</CardTitle>
-          <CardDescription>고유한 이름과 비밀번호로 새로운 관리자 계정을 생성합니다</CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          <div className="space-y-4">
-            {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-600 text-sm space-y-2">
-                <p className="font-medium">⚠️ {error}</p>
-                
-                {/* RLS Policy Error Help */}
-                {error.includes('new row violates row-level security policy') || error.includes('RLS') || error.includes('Policy') ? (
-                  <div className="text-xs bg-black/20 p-2 rounded border border-red-500/30 space-y-2">
-                    <p className="font-semibold">✓ RLS 정책이 없습니다. Supabase 대시보드의 SQL 에디터에서 다음을 실행하세요:</p>
-                    <code className="block whitespace-pre-wrap break-words text-red-400 bg-black/40 p-2 rounded">
-{`ALTER TABLE managers ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Allow public insert" ON managers
-  FOR INSERT WITH CHECK (TRUE);
-
-CREATE POLICY "Allow public select" ON managers
-  FOR SELECT USING (TRUE);
-
-CREATE POLICY "Allow public update" ON managers
-  FOR UPDATE USING (TRUE);
-
-CREATE POLICY "Allow public delete" ON managers
-  FOR DELETE USING (TRUE);`}
-                    </code>
-                  </div>
-                ) : error.includes('initialize') ? (
-                  <div className="text-xs bg-black/20 p-2 rounded border border-red-500/30">
-                    <p className="font-semibold mb-1">✓ 테이블을 생성하려면 다음 SQL을 실행하세요:</p>
-                    <code className="block whitespace-pre-wrap break-words text-red-400">
-                      CREATE TABLE IF NOT EXISTS managers (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT DEFAULT 'manager', created_at TIMESTAMP DEFAULT NOW());
-                    </code>
-                  </div>
-                ) : null}
-              </div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-foreground block mb-2">관리자 이름</label>
-                <Input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => { setNewName(e.target.value); setError(null) }}
-                  placeholder="예: John, Sarah"
-                  disabled={isAdding || !tableInitialized}
-                  className="bg-background border-border"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-foreground block mb-2">비밀번호</label>
-                <Input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => { setNewPassword(e.target.value); setError(null) }}
-                  placeholder="최소 4자"
-                  disabled={isAdding || !tableInitialized}
-                  className="bg-background border-border"
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter' && !isAdding && tableInitialized) {
-                      handleAddManager()
-                    }
-                  }}
-                />
-              </div>
-            </div>
-
-            <Button
-              onClick={handleAddManager}
-              disabled={isAdding || !tableInitialized}
-              className="w-full bg-primary hover:bg-primary/90 gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              {isAdding ? '추가 중...' : tableInitialized ? '관리자 추가' : '테이블 초기화 중...'}
-            </Button>
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-primary" />
+            사용자 관리
+          </CardTitle>
+          <CardDescription className="mt-1">
+            직원 계정을 등록하고 권한(최고 관리자 / 매니저)을 지정합니다.
+          </CardDescription>
+        </div>
+        {canWrite && (
+          <Button onClick={openAdd} className="gap-2 shrink-0">
+            <Plus className="h-4 w-4" /> 직원 추가
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            {error}
           </div>
-        </CardContent>
-      </Card>
+        )}
 
-      {/* Managers List Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle>관리자 목록</CardTitle>
-          <CardDescription>총: {managers?.length || 0}명</CardDescription>
-        </CardHeader>
+        {loading ? (
+          <div className="flex items-center justify-center py-12 text-muted-foreground">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> 불러오는 중...
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>이름</TableHead>
+                  <TableHead>아이디</TableHead>
+                  <TableHead>비밀번호</TableHead>
+                  <TableHead>권한</TableHead>
+                  {canWrite && <TableHead className="text-right">관리</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={canWrite ? 5 : 4} className="text-center text-muted-foreground py-8">
+                      등록된 직원이 없습니다.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  users.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell className="font-medium">{user.name}</TableCell>
+                      <TableCell className="font-mono text-sm">{user.login_id}</TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground">
+                        {"•".repeat(Math.min(8, Math.max(4, user.password?.length ?? 6)))}
+                      </TableCell>
+                      <TableCell>
+                        {user.role === "super_admin" ? (
+                          <Badge className="gap-1 bg-primary/15 text-primary border-primary/30" variant="outline">
+                            <ShieldCheck className="h-3 w-3" /> {ROLE_LABEL.super_admin}
+                          </Badge>
+                        ) : (
+                          <Badge className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/30" variant="outline">
+                            <Eye className="h-3 w-3" /> {ROLE_LABEL.manager}
+                          </Badge>
+                        )}
+                      </TableCell>
+                      {canWrite && (
+                        <TableCell>
+                          <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="outline" className="gap-1" onClick={() => openEdit(user)}>
+                              <Pencil className="h-3.5 w-3.5" /> 수정
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="gap-1"
+                              onClick={() => handleDelete(user)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" /> 삭제
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
 
-        <CardContent>
-          {loading ? (
-            <div className="text-center py-8 text-muted-foreground">관리자 목록 로드 중...</div>
-          ) : !tableInitialized ? (
-            <div className="text-center py-8 text-muted-foreground">테이블을 초기화하는 중입니다. 잠시만 기다려주세요...</div>
-          ) : (managers?.length ?? 0) > 0 ? (
-            <div className="space-y-2">
-              {(managers ?? []).map((manager) => (
-                <div key={manager.name || manager.id} className="flex items-center justify-between p-3 bg-muted rounded-md">
-                  <div>
-                    <p className="font-medium">{manager.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      등록: {formatDate(manager.created_at)}
-                    </p>
-                  </div>
-                  <Button
-                    onClick={() => handleDeleteManager(manager.name)}
-                    variant="destructive"
-                    size="sm"
-                    className="gap-2"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    삭제
-                  </Button>
-                </div>
-              ))}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{form.id ? "직원 정보 수정" : "새 직원 추가"}</DialogTitle>
+            <DialogDescription>
+              이름, 로그인 아이디, 비밀번호와 권한을 지정하세요.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="staff-name">이름</Label>
+              <Input
+                id="staff-name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="예: Luna"
+              />
             </div>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground">관리자가 없습니다. 위에서 등록하세요.</div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="staff-id">아이디</Label>
+              <Input
+                id="staff-id"
+                value={form.loginId}
+                onChange={(e) => setForm({ ...form, loginId: e.target.value })}
+                placeholder="로그인에 사용할 아이디"
+                className="font-mono"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="staff-pw">비밀번호</Label>
+              <Input
+                id="staff-pw"
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder={form.id ? "변경 시에만 입력" : "비밀번호"}
+                autoComplete="new-password"
+              />
+              {form.id && (
+                <p className="text-xs text-muted-foreground">비워두면 기존 비밀번호가 유지됩니다.</p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="staff-role">권한</Label>
+              <Select
+                value={form.role}
+                onValueChange={(value) => setForm({ ...form, role: value as Role })}
+              >
+                <SelectTrigger id="staff-role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="super_admin">
+                    최고 관리자 — 전체 데이터 추가/수정/삭제
+                  </SelectItem>
+                  <SelectItem value="manager">
+                    매니저 — 읽기 전용 (조회 · 엑셀 · 인쇄)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {formError && <p className="text-sm text-destructive">{formError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
+              취소
+            </Button>
+            <Button onClick={handleSave} disabled={saving} className="gap-2">
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {form.id ? "저장" : "추가"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   )
 }

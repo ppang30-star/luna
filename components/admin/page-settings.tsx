@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { adminTranslations } from "@/lib/admin-translations"
 import { useStoreSettings } from "@/hooks/use-store-settings"
 import { Loader2, Check, AlertCircle, Trash2, Plus, ChevronLeft, ChevronRight } from "lucide-react"
+import { useAdminRole } from "@/components/admin/role-context"
 
 interface LocalPageSettings {
   title: string
@@ -24,6 +25,7 @@ interface PageSettingsProps {
 
 export default function PageSettings({ language = "ko" }: PageSettingsProps) {
   const t = adminTranslations[language as keyof typeof adminTranslations]
+  const { canWrite } = useAdminRole()
   
   // Supabase store settings for table numbers (global state)
   const { settings: storeSettings, loading: storeLoading, saveTableNumbers, saveSettings } = useStoreSettings()
@@ -93,6 +95,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
   }, [storeLoading, storeSettings.page_title, storeSettings.page_subtitle])
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canWrite) return // RBAC: read-only managers cannot change settings
     const file = e.target.files?.[0]
     if (file) {
       const reader = new FileReader()
@@ -106,6 +109,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
   }
 
   const handleSaveLocalSettings = () => {
+    if (!canWrite) return // RBAC: read-only managers cannot save
     // Save to localStorage for backward compatibility
     const toSave = {
       ...localSettings,
@@ -119,6 +123,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
   // ★ Persist title & subtitle to Supabase so changes are permanent and shared
   // across all devices (via the store_settings realtime subscription).
   const handleSaveTitleSubtitle = async () => {
+    if (!canWrite) return // RBAC: read-only managers cannot save
     setTitleSaving(true)
     setTitleError(null)
 
@@ -149,6 +154,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
   }
 
   const handleReset = () => {
+    if (!canWrite) return // RBAC: read-only managers cannot reset
     setLocalSettings(DEFAULT_LOCAL_SETTINGS)
     setPreviewImage("")
     localStorage.removeItem("pageSettings")
@@ -157,6 +163,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
 
   // Add table number
   const handleAddTable = () => {
+    if (!canWrite) return // RBAC: read-only managers cannot modify tables
     const trimmed = tableInput.trim()
     if (trimmed && !tableNumbers.includes(trimmed)) {
       setTableNumbers([...tableNumbers, trimmed])
@@ -166,11 +173,13 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
 
   // Remove table number
   const handleRemoveTable = (table: string) => {
+    if (!canWrite) return // RBAC: read-only managers cannot modify tables
     setTableNumbers(tableNumbers.filter((t) => t !== table))
   }
 
   // Move a table left/right (swap with adjacent) and persist the new order
   const handleMoveTable = async (index: number, direction: "left" | "right") => {
+    if (!canWrite) return // RBAC: read-only managers cannot reorder tables
     const targetIndex = direction === "left" ? index - 1 : index + 1
     if (targetIndex < 0 || targetIndex >= tableNumbers.length) return
 
@@ -187,6 +196,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
 
   // Save table numbers to Supabase (global state)
   const handleSaveTableNumbers = async () => {
+    if (!canWrite) return // RBAC: read-only managers cannot save
     setTableSaving(true)
     setTableError(null)
     
@@ -211,6 +221,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
 
   // Add multiple tables at once (comma-separated)
   const handleBulkAddTables = (input: string) => {
+    if (!canWrite) return // RBAC: read-only managers cannot modify tables
     const newTables = input
       .split(",")
       .map((t) => t.trim())
@@ -239,6 +250,8 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
               onChange={(e) => setLocalSettings({ ...localSettings, title: e.target.value })}
               placeholder={t.titlePlaceholder}
               className="text-lg"
+              readOnly={!canWrite}
+              disabled={!canWrite}
             />
           </div>
 
@@ -249,6 +262,8 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
               value={localSettings.subtitle}
               onChange={(e) => setLocalSettings({ ...localSettings, subtitle: e.target.value })}
               placeholder={t.subtitlePlaceholder}
+              readOnly={!canWrite}
+              disabled={!canWrite}
             />
           </div>
 
@@ -261,21 +276,23 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
           )}
 
           {/* ★ Save button directly below the title & subtitle inputs */}
-          <Button onClick={handleSaveTitleSubtitle} className="w-full" disabled={titleSaving}>
-            {titleSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                저장 중...
-              </>
-            ) : titleSaved ? (
-              <>
-                <Check className="h-4 w-4 mr-2" />
-                저장됨! (모든 기기에 반영)
-              </>
-            ) : (
-              t.saveSettings
-            )}
-          </Button>
+          {canWrite && (
+            <Button onClick={handleSaveTitleSubtitle} className="w-full" disabled={titleSaving}>
+              {titleSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  저장 중...
+                </>
+              ) : titleSaved ? (
+                <>
+                  <Check className="h-4 w-4 mr-2" />
+                  저장됨! (모든 기기에 반영)
+                </>
+              ) : (
+                t.saveSettings
+              )}
+            </Button>
+          )}
         </CardContent>
       </Card>
 
@@ -300,6 +317,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
           ) : (
             <>
               {/* Add single table */}
+              {canWrite && (
               <div className="space-y-2">
                 <Label htmlFor="tableInput">{t.tableNumbers || "테이블 번호 추가"}</Label>
                 <div className="flex gap-2">
@@ -324,8 +342,10 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
                   Enter 키 또는 + 버튼으로 추가. 쉼표(,)로 여러 개 한번에 입력 가능
                 </p>
               </div>
+              )}
 
               {/* Bulk add */}
+              {canWrite && (
               <div className="space-y-2">
                 <Label>한번에 여러 테이블 추가</Label>
                 <div className="flex gap-2">
@@ -342,6 +362,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
                   />
                 </div>
               </div>
+              )}
 
               {/* Current table list */}
               <div className="space-y-2">
@@ -354,30 +375,36 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
                         variant="secondary"
                         className="px-2 py-1.5 text-sm font-medium flex items-center gap-1 group"
                       >
-                        <button
-                          onClick={() => handleMoveTable(index, "left")}
-                          disabled={index === 0}
-                          aria-label="왼쪽으로 이동"
-                          className="opacity-50 hover:opacity-100 transition-opacity disabled:opacity-20 disabled:cursor-not-allowed"
-                        >
-                          <ChevronLeft className="h-3.5 w-3.5" />
-                        </button>
+                        {canWrite && (
+                          <button
+                            onClick={() => handleMoveTable(index, "left")}
+                            disabled={index === 0}
+                            aria-label="왼쪽으로 이동"
+                            className="opacity-50 hover:opacity-100 transition-opacity disabled:opacity-20 disabled:cursor-not-allowed"
+                          >
+                            <ChevronLeft className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <span className="px-0.5">{table}</span>
-                        <button
-                          onClick={() => handleMoveTable(index, "right")}
-                          disabled={index === tableNumbers.length - 1}
-                          aria-label="오른쪽으로 이동"
-                          className="opacity-50 hover:opacity-100 transition-opacity disabled:opacity-20 disabled:cursor-not-allowed"
-                        >
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleRemoveTable(table)}
-                          aria-label="삭제"
-                          className="ml-0.5 opacity-50 hover:opacity-100 hover:text-destructive transition-opacity"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
+                        {canWrite && (
+                          <button
+                            onClick={() => handleMoveTable(index, "right")}
+                            disabled={index === tableNumbers.length - 1}
+                            aria-label="오른쪽으로 이동"
+                            className="opacity-50 hover:opacity-100 transition-opacity disabled:opacity-20 disabled:cursor-not-allowed"
+                          >
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {canWrite && (
+                          <button
+                            onClick={() => handleRemoveTable(table)}
+                            aria-label="삭제"
+                            className="ml-0.5 opacity-50 hover:opacity-100 hover:text-destructive transition-opacity"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
                       </Badge>
                     ))}
                   </div>
@@ -397,6 +424,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
               )}
 
               {/* Save button */}
+              {canWrite && (
               <Button
                 onClick={handleSaveTableNumbers}
                 variant="default"
@@ -417,6 +445,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
                   "테이블 목록 저장 (전체 기기 공유)"
                 )}
               </Button>
+              )}
             </>
           )}
         </CardContent>
@@ -428,6 +457,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
           <CardDescription>{t.editBackgroundImageDesc}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {canWrite && (
           <div className="space-y-2">
             <Label htmlFor="backgroundImage">{t.backgroundImageUpload}</Label>
             <Input
@@ -439,6 +469,7 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
             />
             <p className="text-xs text-muted-foreground">{t.recommendedImageSize}</p>
           </div>
+          )}
 
           {previewImage && (
             <div className="space-y-2">
@@ -447,29 +478,33 @@ export default function PageSettings({ language = "ko" }: PageSettingsProps) {
                 className="w-full h-48 rounded-lg border border-border bg-cover bg-center"
                 style={{ backgroundImage: `url(${previewImage})` }}
               />
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  setLocalSettings({ ...localSettings, backgroundImage: "" })
-                  setPreviewImage("")
-                }}
-              >
-                {t.removeImage}
-              </Button>
+              {canWrite && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    setLocalSettings({ ...localSettings, backgroundImage: "" })
+                    setPreviewImage("")
+                  }}
+                >
+                  {t.removeImage}
+                </Button>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
 
-      <div className="flex gap-2">
-        <Button onClick={handleSaveLocalSettings} className="flex-1" size="lg">
-          {saved ? t.saved : t.saveSettings}
-        </Button>
-        <Button onClick={handleReset} variant="outline" size="lg">
-          {t.reset}
-        </Button>
-      </div>
+      {canWrite && (
+        <div className="flex gap-2">
+          <Button onClick={handleSaveLocalSettings} className="flex-1" size="lg">
+            {saved ? t.saved : t.saveSettings}
+          </Button>
+          <Button onClick={handleReset} variant="outline" size="lg">
+            {t.reset}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useMemo, Fragment } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { ChevronDown, ChevronRight, Users, Clock, DollarSign, Calendar } from "lucide-react"
 import type { AdminLanguage } from "@/lib/admin-translations"
 
@@ -172,30 +171,29 @@ export default function StaffPayrollReport({ language = "ko" }: { language?: Adm
   useEffect(() => {
     const fetchSales = async () => {
       setLoading(true)
-      const supabase = createClient()
-      if (!supabase) {
-        setLoading(false)
-        return
-      }
 
-      let query = supabase.from("sales_records").select("*").order("created_at", { ascending: false })
-
+      let from: string
+      let to: string
       if (viewMode === "daily") {
-        query = query.gte("created_at", `${selectedDate}T00:00:00`).lte("created_at", `${selectedDate}T23:59:59`)
+        from = `${selectedDate}T00:00:00`
+        to = `${selectedDate}T23:59:59`
       } else {
         const [year, month] = selectedMonth.split("-")
         const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate()
-        query = query
-          .gte("created_at", `${year}-${month}-01T00:00:00`)
-          .lte("created_at", `${year}-${month}-${lastDay}T23:59:59`)
+        from = `${year}-${month}-01T00:00:00`
+        to = `${year}-${month}-${lastDay}T23:59:59`
       }
 
-      const { data, error } = await query
-      if (error) {
-        console.error("[v0] Payroll fetch error:", error)
+      // Read through the server route so it uses runtime env vars (host-agnostic).
+      const params = new URLSearchParams({ resource: "sales_records", from, to })
+      const res = await fetch(`/api/sales?${params.toString()}`, { cache: "no-store" })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.error("[v0] Payroll fetch error:", res.status, err?.error)
         setSalesData([])
       } else {
-        setSalesData((data as SalesRecord[]) || [])
+        const body = await res.json().catch(() => ({}))
+        setSalesData((body?.data as SalesRecord[]) || [])
       }
       setLoading(false)
     }

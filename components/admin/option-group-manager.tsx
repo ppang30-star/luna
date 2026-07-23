@@ -11,11 +11,13 @@ import {
   deleteComboOptionGroup,
   type ComboOptionGroup,
 } from "@/lib/combo-options"
+import { useAdminRole } from "@/components/admin/role-context"
 
 // Global manager for reusable Combo Option Groups (e.g. "소주" containing "참이슬",
 // "처음처럼"). Admins type Korean only; the User UI translates at render time.
 export default function OptionGroupManager() {
   const { groups, refetch } = useComboOptionGroups()
+  const { canWrite } = useAdminRole()
   const [editing, setEditing] = useState<ComboOptionGroup | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -53,6 +55,7 @@ export default function OptionGroupManager() {
   }
 
   const handleSave = async () => {
+    if (!canWrite) return // RBAC: read-only managers cannot save
     if (!editing) return
     const name = editing.name.trim()
     if (!name) {
@@ -80,6 +83,7 @@ export default function OptionGroupManager() {
   }
 
   const handleDelete = async (id: string) => {
+    if (!canWrite) return // RBAC: read-only managers cannot delete
     if (!confirm("이 옵션 그룹을 삭제하시겠습니까? 연결된 콤보에서도 제거됩니다.")) return
     try {
       await deleteComboOptionGroup(id)
@@ -100,7 +104,7 @@ export default function OptionGroupManager() {
               한국어로만 입력하세요. 고객 화면에서는 선택된 언어로 자동 번역됩니다.
             </p>
           </div>
-          {!editing && (
+          {canWrite && !editing && (
             <Button onClick={startNew} className="gap-2">
               <Plus className="w-4 h-4" /> 새 그룹
             </Button>
@@ -176,19 +180,21 @@ export default function OptionGroupManager() {
                         {group.items.map((it) => it.name).join(", ")}
                       </p>
                     </div>
-                    <div className="flex gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" onClick={() => startEdit(group)} aria-label="편집">
-                        <Pencil className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDelete(group.id)}
-                        aria-label="삭제"
-                      >
-                        <Trash2 className="w-4 h-4 text-destructive" />
-                      </Button>
-                    </div>
+                    {canWrite && (
+                      <div className="flex gap-1 shrink-0">
+                        <Button variant="ghost" size="icon" onClick={() => startEdit(group)} aria-label="편집">
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDelete(group.id)}
+                          aria-label="삭제"
+                        >
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

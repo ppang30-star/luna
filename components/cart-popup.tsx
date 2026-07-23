@@ -9,7 +9,6 @@ import { sendTelegramOrder, sendTelegramReceipt, sendTelegramCancellation } from
 import { Separator } from "@/components/ui/separator"
 import { useExchangeRates } from "@/hooks/use-exchange-rates"
 import { useStoreSettings } from "@/hooks/use-store-settings"
-import { createClient } from "@/lib/supabase/client"
 import TableConfirmationPopup from "@/components/table-confirmation-popup"
 import BillConfigurationModal, { type BillConfiguration } from "@/components/bill-configuration-modal"
   import ReceiptVerificationModal from "@/components/receipt-verification-modal"
@@ -1018,31 +1017,31 @@ export default function CartPopup({
     }))
 
     try {
-      // Supabase 클라이언트 생성
-      const supabase = createClient()
+      // ★ 빌 번호 생성도 서버 라우트(/api/bills)로 처리한다. 브라우저 클라이언트는
+      //   빌드타임 NEXT_PUBLIC_* 인라인에 의존해 Netlify 프로덕션에서 실패할 수 있으므로,
+      //   런타임 서버 환경변수를 읽는 라우트로 일원화한다.
       let billNumber: number | null = null
 
-      if (supabase) {
-        // Supabase bills 테이���에 insert하����� 생성된 id(빌 번호)를 받아옴
-        const { data, error } = await supabase
-          .from('bills')
-          .insert({
-            table_no: tableSnapshot || 'N/A',
-            order_details: orderDetails,
-            total_amount: totalAmount,
-            currency: currency,
-          })
-          .select('id')
-          .single()
+      const billRes = await fetch('/api/bills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          table_no: tableSnapshot || 'N/A',
+          order_details: orderDetails,
+          total_amount: totalAmount,
+          currency: currency,
+        }),
+      })
 
-        if (error) {
-          console.error("빌 생성 실패:", error)
-          setIsProcessing(false)
-          return
-        }
-
-        billNumber = data?.id ?? null
+      if (!billRes.ok) {
+        const errBody = await billRes.json().catch(() => ({}))
+        console.error("[v0] 빌 생성 실패:", billRes.status, errBody?.error)
+        setIsProcessing(false)
+        return
       }
+
+      const billResult = await billRes.json().catch(() => ({}))
+      billNumber = billResult?.id ?? null
 
       // 빌 데이터 저장 (STEP 3에서 사용)
       setPendingBillData({
@@ -1279,7 +1278,7 @@ export default function CartPopup({
   receiptText += `${tmpl.thankYou}\n`
   
   // ★ RawBT Android Intent - Pure plain text via Intent URI Scheme
-  // ★ 실제 태블릿(Android)에서만 intent를 실행한다. 데스크톱/미리보기 환경에서는
+  // ★ 실제 태블���(Android)에서만 intent를 실행한다. 데스크톱/미리보기 환경에서는
   //    intent: 네비게이션이 페이지를 깨뜨리므로 건너뛰고 곧바로 확인 단계로 진행한다.
   //    → 실제 하드웨어 동작은 전혀 바뀌지 않음(안드로이드에서는 종전과 동일하게 인쇄).
   const canPrintViaIntent =
@@ -1356,103 +1355,92 @@ export default function CartPopup({
     }
 
     // ★ sales_records에 매출 데이터 저장 (bill_id 포함 - 통일된 빌 번호)
+    // ★ 중요: 브라우저 Supabase 클라이언트(NEXT_PUBLIC_* 빌드타임 인라인)를 쓰지 않고
+    //   서버 라우트(/api/sales)로 저장한다. 서버는 런타임 환경변수를 읽으므로
+    //   Netlify처럼 빌드 시점에 NEXT_PUBLIC_*가 없던 환경에서도 항상 정상 저장된다.
     if (pendingBillConfig && pendingBillData) {
       try {
-        const supabase = createClient()
-        if (supabase) {
-          const salesRecord = {
-            bill_id: pendingBillData.billNumber, // ★ bills 테이블의 id를 통일된 빌 번호로 저장
-            table_no: pendingBillData.tableSnapshot || 'N/A',
-            items: pendingBillData.historySnapshot.map(({ item, totalQty }) => ({
-              menuId: item.id,
-              nameKo: item.nameKo,
-              nameEn: item.nameEn,
-              quantity: totalQty,
-              unitPrice: item.priceAmount ?? item.priceKRW ?? 0,
-              // ★ 추가(비파괴): 직원별 정산 리포트를 위해 스태프(모디파이어) 정보를 함께 저장.
-              // JSONB 컬럼이라 기존 저장 흐름을 바꾸지 않고 필드만 덧붙인다.
-              selectedModifiers: item.selectedModifiers ?? null,
-              // ★ 콤보 메뉴: 고객이 선택한 세부 항목(예: 소주 → 참이슬)을 통계용으로 저장.
-              // 한국어 원문만 저장하고, 조회 화면에서 번역한다.
-              comboOptions: item.comboOptions ?? null,
-            })),
-            payment_method: pendingBillConfig.paymentMethod,
-            subtotal: pendingBillData.totalAmount,
-            vat: pendingBillConfig.vatAmount || 0,
-            discount: pendingBillConfig.discountAmount || 0,
-            card_fee: pendingBillConfig.cardSurcharge || 0,
-            grand_total: pendingBillConfig.grandTotal,
-          }
-          
-          const { data: insertedSale, error } = await supabase
-            .from('sales_records')
-            .insert(salesRecord)
-            .select('id')
-            .single()
-          
-          if (error) {
-            console.error("매출 기록 저장 실패:", error)
-          }
+        const salesRecord = {
+          bill_id: pendingBillData.billNumber, // ★ bills 테이블의 id를 통일된 빌 번호로 저장
+          table_no: pendingBillData.tableSnapshot || 'N/A',
+          items: pendingBillData.historySnapshot.map(({ item, totalQty }) => ({
+            menuId: item.id,
+            nameKo: item.nameKo,
+            nameEn: item.nameEn,
+            quantity: totalQty,
+            unitPrice: item.priceAmount ?? item.priceKRW ?? 0,
+            // ★ 추가(비파괴): 직원별 정산 리포트를 위해 스태프(모디파이어) 정보를 함께 저장.
+            // JSONB 컬럼이라 기존 저장 흐름을 바꾸지 않고 필드만 덧붙인다.
+            selectedModifiers: item.selectedModifiers ?? null,
+            // ★ 콤보 메뉴: 고객이 선택한 세부 항목(예: 소주 → 참이슬)을 통계용으로 저장.
+            // 한국어 원문만 저장하고, 조회 화면에서 번역한다.
+            comboOptions: item.comboOptions ?? null,
+          })),
+          payment_method: pendingBillConfig.paymentMethod,
+          subtotal: pendingBillData.totalAmount,
+          vat: pendingBillConfig.vatAmount || 0,
+          discount: pendingBillConfig.discountAmount || 0,
+          card_fee: pendingBillConfig.cardSurcharge || 0,
+          grand_total: pendingBillConfig.grandTotal,
+        }
 
-          // ★ 추가(비파괴): 통계용 평탄화 테이블(sale_line_items)에 동시 저장(dual-write).
-          // 기존 sales_records(JSONB)는 그대로 유지되며, 이 블록이 실패해도
-          // 결제 흐름/기존 UI에는 절대 영향을 주지 않는다(격리된 try/catch).
-          if (!error && insertedSale?.id) {
-            try {
-              const lineItems: any[] = []
-              for (const { item, totalQty } of pendingBillData.historySnapshot) {
-                const unitPrice = item.priceAmount ?? item.priceKRW ?? 0
-                // 상위 메뉴 라인
-                lineItems.push({
-                  sale_record_id: insertedSale.id,
-                  bill_id: pendingBillData.billNumber,
-                  line_type: 'item',
-                  parent_menu_id: String(item.id),
-                  parent_name_ko: item.nameKo,
-                  parent_name_en: item.nameEn,
-                  item_name_ko: item.nameKo,
-                  item_name_en: item.nameEn,
-                  quantity: totalQty,
-                  unit_price: unitPrice,
-                  line_total: unitPrice * totalQty,
-                  payment_method: pendingBillConfig.paymentMethod,
-                })
-                // 콤보 세부 항목(소주 → 참이슬 등) 라인
-                if (Array.isArray(item.comboOptions)) {
-                  for (const opt of item.comboOptions) {
-                    lineItems.push({
-                      sale_record_id: insertedSale.id,
-                      bill_id: pendingBillData.billNumber,
-                      line_type: 'combo_option',
-                      parent_menu_id: String(item.id),
-                      parent_name_ko: item.nameKo,
-                      parent_name_en: item.nameEn,
-                      combo_group_ko: opt.groupName ?? null,
-                      item_name_ko: opt.itemName,
-                      item_name_en: opt.itemName,
-                      quantity: (opt.quantity ?? 0) * totalQty,
-                      unit_price: 0,
-                      line_total: 0,
-                      payment_method: pendingBillConfig.paymentMethod,
-                    })
-                  }
-                }
-              }
-              if (lineItems.length > 0) {
-                const { error: lineError } = await supabase
-                  .from('sale_line_items')
-                  .insert(lineItems)
-                if (lineError) {
-                  console.error("[v0] sale_line_items 저장 실패:", lineError)
-                }
-              }
-            } catch (lineErr) {
-              console.error("[v0] sale_line_items 저장 중 오류:", lineErr)
+        // ★ 통계용 평탄화 라인아이템(sale_line_items). sale_record_id는 서버가
+        //   sales_records 삽입 후 채워 넣는다(클라이언트는 미리 알 수 없음).
+        const lineItems: any[] = []
+        for (const { item, totalQty } of pendingBillData.historySnapshot) {
+          const unitPrice = item.priceAmount ?? item.priceKRW ?? 0
+          // 상위 메뉴 라인
+          lineItems.push({
+            bill_id: pendingBillData.billNumber,
+            line_type: 'item',
+            parent_menu_id: String(item.id),
+            parent_name_ko: item.nameKo,
+            parent_name_en: item.nameEn,
+            item_name_ko: item.nameKo,
+            item_name_en: item.nameEn,
+            quantity: totalQty,
+            unit_price: unitPrice,
+            line_total: unitPrice * totalQty,
+            payment_method: pendingBillConfig.paymentMethod,
+          })
+          // 콤보 세부 항목(소주 → 참이슬 등) 라인
+          if (Array.isArray(item.comboOptions)) {
+            for (const opt of item.comboOptions) {
+              lineItems.push({
+                bill_id: pendingBillData.billNumber,
+                line_type: 'combo_option',
+                parent_menu_id: String(item.id),
+                parent_name_ko: item.nameKo,
+                parent_name_en: item.nameEn,
+                combo_group_ko: opt.groupName ?? null,
+                item_name_ko: opt.itemName,
+                item_name_en: opt.itemName,
+                quantity: (opt.quantity ?? 0) * totalQty,
+                unit_price: 0,
+                line_total: 0,
+                payment_method: pendingBillConfig.paymentMethod,
+              })
             }
           }
         }
+
+        const res = await fetch('/api/sales', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ salesRecord, lineItems }),
+        })
+
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}))
+          console.error("[v0] 매출 기록 저장 실패:", res.status, errBody?.error)
+        } else {
+          const result = await res.json().catch(() => ({}))
+          if (result?.lineItemsError) {
+            console.error("[v0] sale_line_items 저장 실패:", result.lineItemsError)
+          }
+        }
       } catch (err) {
-        console.error("매출 기록 저장 중 오류:", err)
+        console.error("[v0] 매출 기록 저장 중 오류:", err)
       }
     }
     

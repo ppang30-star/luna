@@ -16,6 +16,7 @@ const languages = [
   { code: "ja", label: "日本語", flag: "🇯🇵" },
   { code: "zh", label: "中文", flag: "🇨🇳" },
   { code: "vi", label: "Tiếng Việt", flag: "🇻🇳" },
+  { code: "hi", label: "हिन्दी", flag: "🇮🇳" },
 ]
 
 export default function LanguageSelector({ value, onChange }: LanguageSelectorProps) {

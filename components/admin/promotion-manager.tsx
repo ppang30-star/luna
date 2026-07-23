@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Trash2, Upload, X } from "lucide-react"
 import { adminTranslations } from "@/lib/admin-translations"
+import { useAdminRole } from "@/components/admin/role-context"
 
 interface PromotionImage {
   id: string
@@ -25,6 +26,7 @@ const DEFAULT_PROMOTIONS: PromotionImage[] = []
 
 export default function PromotionManager({ language = "ko" }: PromotionManagerProps) {
   const t = adminTranslations[language as keyof typeof adminTranslations]
+  const { canWrite } = useAdminRole()
   const [promotions, setPromotions] = useState<PromotionImage[]>(DEFAULT_PROMOTIONS)
   const [mounted, setMounted] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -91,6 +93,7 @@ export default function PromotionManager({ language = "ko" }: PromotionManagerPr
   }
 
   const handleSave = () => {
+    if (!canWrite) return // RBAC: read-only managers cannot save
     console.log("[v0] Saving promotions to localStorage:", {
       count: promotions.length,
       promotions: promotions.map((p) => ({ id: p.id, title: p.title, order: p.order, imageSize: p.image.length })),
@@ -106,6 +109,7 @@ export default function PromotionManager({ language = "ko" }: PromotionManagerPr
 
   return (
     <div className="space-y-6">
+      {canWrite && (
       <Card>
         <CardHeader>
           <CardTitle>{t.promotionTitle}</CardTitle>
@@ -149,6 +153,7 @@ export default function PromotionManager({ language = "ko" }: PromotionManagerPr
           </div>
         </CardContent>
       </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -183,25 +188,29 @@ export default function PromotionManager({ language = "ko" }: PromotionManagerPr
                         onChange={(e) => handleUpdateTitle(promo.id, e.target.value)}
                         placeholder={t.eventTitlePlaceholder}
                         className="text-sm"
+                        readOnly={!canWrite}
+                        disabled={!canWrite}
                       />
                     </div>
                   </div>
-                  <div className="flex gap-2 justify-end pt-2 border-t">
-                    <Button size="sm" variant="outline" onClick={() => handleMoveUp(index)} disabled={index === 0}>
-                      {t.moveUp}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleMoveDown(index)}
-                      disabled={index === promotions.length - 1}
-                    >
-                      {t.moveDown}
-                    </Button>
-                    <Button size="sm" variant="destructive" onClick={() => handleDelete(promo.id)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
+                  {canWrite && (
+                    <div className="flex gap-2 justify-end pt-2 border-t">
+                      <Button size="sm" variant="outline" onClick={() => handleMoveUp(index)} disabled={index === 0}>
+                        {t.moveUp}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleMoveDown(index)}
+                        disabled={index === promotions.length - 1}
+                      >
+                        {t.moveDown}
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => handleDelete(promo.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -209,9 +218,11 @@ export default function PromotionManager({ language = "ko" }: PromotionManagerPr
         </CardContent>
       </Card>
 
-      <Button onClick={handleSave} size="lg" className="w-full">
-        {saved ? t.saved : t.saveSettings}
-      </Button>
+      {canWrite && (
+        <Button onClick={handleSave} size="lg" className="w-full">
+          {saved ? t.saved : t.saveSettings}
+        </Button>
+      )}
     </div>
   )
 }
