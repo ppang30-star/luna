@@ -45,14 +45,15 @@ export async function GET(
       )
     }
 
-    const raw: string = data.image
+    const raw: string = data.image.trim()
 
-    // If it's a plain URL (not a data URI), just redirect to it.
-    if (!raw.startsWith("data:")) {
+    // Images are stored in-DB as base64 data URIs (data:<mime>;base64,<payload>).
+    // If some legacy row already holds an absolute URL, just redirect to it.
+    if (/^https?:\/\//i.test(raw)) {
       return NextResponse.redirect(raw)
     }
 
-    // Parse the data URI: data:<mime>;base64,<payload>
+    // Parse the data URI.
     const match = raw.match(/^data:([^;]+);base64,(.*)$/s)
     if (!match) {
       return NextResponse.redirect(
@@ -61,12 +62,16 @@ export async function GET(
     }
 
     const contentType = match[1] || "image/jpeg"
-    const buffer = Buffer.from(match[2], "base64")
+    // Return a Uint8Array (Web-standard body) rather than a Node Buffer. This
+    // serializes correctly through Netlify's Next.js function runtime, whereas a
+    // raw Buffer can be mangled/dropped, producing broken images in production.
+    const bytes = Uint8Array.from(Buffer.from(match[2], "base64"))
 
-    return new NextResponse(buffer, {
+    return new NextResponse(bytes, {
       status: 200,
       headers: {
         "Content-Type": contentType,
+        "Content-Length": String(bytes.byteLength),
         // Cache aggressively: images rarely change, and this offloads repeat views.
         "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
       },
