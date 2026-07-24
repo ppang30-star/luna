@@ -1,0 +1,11 @@
+[build]
+  command = "next build"
+  publish = ".next"
+
+# REQUIRED for App Router API routes (like /api/menu/image/[id]) to exist in
+# production. Without this plugin Netlify serves only static assets, so every
+# dynamic route/serverless function returns 404 — which is exactly why menu
+# text (fetched client-side straight from Supabase) works while images
+# (streamed through the server route) 404.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
