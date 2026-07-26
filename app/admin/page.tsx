@@ -25,6 +25,7 @@ import OptionGroupManager from "@/components/admin/option-group-manager"
 import ItemStatisticsReport from "@/components/admin/item-statistics-report"
 import { initializeAllTables } from "@/lib/supabase/initialize-managers-table"
 import { clearAdminSession, getAdminRole } from "@/lib/admin-session"
+import StaffAuthManager from "@/components/admin/staff-auth-manager"
 
 // 직원 정산 탭 라벨 (관리자 언어별)
 const payrollTabLabels: Record<AdminLanguage, string> = {
@@ -338,7 +339,7 @@ export default function AdminPage() {
           <Tabs defaultValue="menu" className="w-full">
             {/* RBAC: the "managers" (account admin) tab is hidden entirely for
                 read-only managers, so the grid column count adjusts accordingly. */}
-            <TabsList className={`grid w-full ${canWrite ? "grid-cols-10" : "grid-cols-9"}`}>
+            <TabsList className={`grid w-full ${canWrite ? "grid-cols-11" : "grid-cols-10"}`}>
               <TabsTrigger value="menu">{t.menuManagement}</TabsTrigger>
               <TabsTrigger value="category">{t.categoryManagement}</TabsTrigger>
               <TabsTrigger value="optionGroups">{t.navComboOptions}</TabsTrigger>
@@ -346,6 +347,7 @@ export default function AdminPage() {
               <TabsTrigger value="promotion">{t.promotion}</TabsTrigger>
               <TabsTrigger value="exchange">{t.exchangeRate}</TabsTrigger>
               {canWrite && <TabsTrigger value="managers">{t.managers}</TabsTrigger>}
+              {canWrite && <TabsTrigger value="staffAuth">{t.staffAuthTab}</TabsTrigger>}
               <TabsTrigger value="priceLog">{t.priceLog}</TabsTrigger>
               <TabsTrigger value="payroll">{payrollTabLabels[adminLanguage]}</TabsTrigger>
               <TabsTrigger value="settings">{t.pageSettings}</TabsTrigger>
@@ -408,6 +410,14 @@ export default function AdminPage() {
               <TabsContent value="managers">
                 <div className="space-y-4">
                   {mounted ? <ManagersManagement /> : <div className="p-8 text-center text-muted-foreground">Loading...</div>}
+                </div>
+              </TabsContent>
+            )}
+
+            {canWrite && (
+              <TabsContent value="staffAuth">
+                <div className="space-y-4">
+                  {mounted ? <StaffAuthManager language={adminLanguage} /> : <div className="p-8 text-center text-muted-foreground">Loading...</div>}
                 </div>
               </TabsContent>
             )}

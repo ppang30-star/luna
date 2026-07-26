@@ -1,12 +1,14 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import LanguageSelector from "@/components/language-selector"
 import CurrencySelector from "@/components/currency-selector"
 import MenuDisplay from "@/components/menu-display"
 import TableSelector from "@/components/table-selector"
 import TableSwitchConfirmationPopup from "@/components/table-switch-confirmation-popup"
 import WelcomePopup from "@/components/welcome-popup"
+import StaffAuthModal from "@/components/staff-auth-modal"
+import { StaffAuthContext, getAuthState, setAuthState, clearAuthState, isAuthExpired, AUTH_TIMEOUT_MS } from "@/lib/staff-auth-context"
   import { LanguageContext, CurrencyContext } from "@/lib/context"
   import { translations, type Language } from "@/lib/translations"
 import { CartContext, type CartItem } from "@/lib/cart-context"
@@ -76,10 +78,15 @@ const DEFAULT_CATEGORIES = [
 export default function MenuPage() {
   // Initialize showWelcomePopup to true so it appears on first load
   const [showWelcomePopup, setShowWelcomePopup] = useState(true)
+  const [showAuthModal, setShowAuthModal] = useState(false)
   const [language, setLanguage] = useState<string>("ko")
   const [currency, setCurrency] = useState<string | null>(null)
   const [currencyInitialized, setCurrencyInitialized] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [exemptUntilPrint, setExemptUntilPrint] = useState(false)
+  const [lastAuthTime, setLastAuthTime] = useState<number | null>(null)
+  const authCheckTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [localSettings, setLocalSettings] = useState<LocalPageSettings>(DEFAULT_LOCAL_SETTINGS)
   // Per-table cart map: each table number keeps its own independent cart,
   // keyed by table number (falling back to "default" when no table is selected).
@@ -352,6 +359,52 @@ export default function MenuPage() {
   const handleWelcomeLanguageSelect = (lang: string) => {
     setLanguage(lang)
     setShowWelcomePopup(false)
+    // Show auth modal immediately after language selection
+    setShowAuthModal(true)
+  }
+
+  // Handler for staff authentication
+  const handleStaffAuthenticate = (exemptUntilPrint: boolean) => {
+    setIsAuthenticated(true)
+    setExemptUntilPrint(exemptUntilPrint)
+    const now = Date.now()
+    setLastAuthTime(now)
+    setShowAuthModal(false)
+    
+    // Save auth state
+    setAuthState({
+      isAuthenticated: true,
+      exemptUntilPrint,
+      lastAuthTime: now,
+    })
+
+    // Set up timer for re-authentication if not exempt
+    if (!exemptUntilPrint) {
+      setupAuthTimer()
+    }
+  }
+
+  // Setup auto re-authentication timer
+  const setupAuthTimer = () => {
+    if (authCheckTimerRef.current) {
+      clearTimeout(authCheckTimerRef.current)
+    }
+    
+    authCheckTimerRef.current = setTimeout(() => {
+      if (!exemptUntilPrint) {
+        setIsAuthenticated(false)
+        setShowAuthModal(true)
+      }
+    }, AUTH_TIMEOUT_MS)
+  }
+
+  // Get staff password from localStorage
+  const getStaffPassword = (): string => {
+    try {
+      return localStorage.getItem("staffAuthPassword") || ""
+    } catch {
+      return ""
+    }
   }
 
   // Session reset handler - called after "최종계산요청" (Request Final Bill) is processed
@@ -376,11 +429,21 @@ export default function MenuPage() {
     selectTable(null)
     localStorage.removeItem("selectedTable")
     
-    // Step 3: Reset language and show language popup
+    // Step 3: Clear authentication state and reset to language selection
+    clearAuthState()
+    setIsAuthenticated(false)
+    setExemptUntilPrint(false)
+    setLastAuthTime(null)
+    if (authCheckTimerRef.current) {
+      clearTimeout(authCheckTimerRef.current)
+    }
+    
+    // Step 4: Reset language and show language popup
     localStorage.removeItem("welcomePopupShown")
     localStorage.removeItem("selectedLanguage")
     setLanguage("ko")
     setShowWelcomePopup(true)
+    setShowAuthModal(false)
   }
 
   // 이전 주문 복원 핸들러
@@ -436,7 +499,7 @@ export default function MenuPage() {
     setShowWelcomePopup(true)
   }
 
-  // Check if welcome popup was already shown (on mount)
+  // Check if welcome popup was already shown (on mount) and restore auth state
   useEffect(() => {
     const hasShownPopup = localStorage.getItem("welcomePopupShown")
     if (hasShownPopup === "true") {
@@ -445,6 +508,27 @@ export default function MenuPage() {
       const savedLang = localStorage.getItem("selectedLanguage")
       if (savedLang) {
         setLanguage(savedLang)
+      }
+
+      // Restore auth state if it exists
+      const authState = getAuthState()
+      if (authState.isAuthenticated) {
+        // Check if auth has expired
+        if (!authState.exemptUntilPrint && isAuthExpired(authState.lastAuthTime)) {
+          // Auth has expired, require re-authentication
+          setIsAuthenticated(false)
+          setShowAuthModal(true)
+        } else {
+          // Auth is still valid
+          setIsAuthenticated(true)
+          setExemptUntilPrint(authState.exemptUntilPrint)
+          setLastAuthTime(authState.lastAuthTime)
+          
+          // Setup timer if not exempt
+          if (!authState.exemptUntilPrint) {
+            setTimeout(() => setupAuthTimer(), 100)
+          }
+        }
       }
     }
   }, [])
@@ -463,6 +547,18 @@ export default function MenuPage() {
               onRestoreOrder={handleRestoreOrder}
               hasPreviousBackup={hasPreviousBackup()}
             />
+          )}
+
+          {/* Staff Authentication Modal */}
+          <StaffAuthModal
+            isOpen={showAuthModal}
+            staffPassword={getStaffPassword()}
+            onAuthenticate={handleStaffAuthenticate}
+          />
+
+          {/* Block access to menu if not authenticated */}
+          {!isAuthenticated && !showWelcomePopup && !showAuthModal && (
+            <div className="fixed inset-0 z-[9997] bg-black/80 flex items-center justify-center pointer-events-none" />
           )}
           
           <main
@@ -535,17 +631,29 @@ export default function MenuPage() {
                 </div>
               </div>
             </header>
-            <MenuDisplay
-              categories={categories}
-              menuItems={menuItemsToShow}
-              setCategories={setCategories}
-              onAddToCart={handleAddToCart}
-              onClearCart={() => commitCart(tableKey, [])}
-              isLoading={realtimeLoading}
-              selectedTable={selectedTable}
-              onSessionReset={handleSessionReset}
-              onRequestTableSelection={handleRequestTableSelection}
-            />
+            
+            {/* Only show menu if authenticated */}
+            {isAuthenticated ? (
+              <>
+                <MenuDisplay
+                  categories={categories}
+                  menuItems={menuItemsToShow}
+                  setCategories={setCategories}
+                  onAddToCart={handleAddToCart}
+                  onClearCart={() => commitCart(tableKey, [])}
+                  isLoading={realtimeLoading}
+                  selectedTable={selectedTable}
+                  onSessionReset={handleSessionReset}
+                  onRequestTableSelection={handleRequestTableSelection}
+                />
+              </>
+            ) : (
+              <div className="min-h-screen flex items-center justify-center text-center">
+                <div className="text-foreground/50">
+                  <p className="text-lg">{translations[language as Language]?.staffAuth?.accessBlocked || "직원 인증이 필요합니다"}</p>
+                </div>
+              </div>
+            )}
             <TableSwitchConfirmationPopup
               isOpen={pendingTable !== null}
               currentTable={selectedTable}
