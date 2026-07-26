@@ -92,15 +92,15 @@ export function ModifierSelectionModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleCancel}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
+      <DialogContent className="max-w-md flex flex-col max-h-[90vh]">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{itemName}</DialogTitle>
           <DialogDescription>
             {language === "ko" ? "필수 선택 항목을 선택해주세요" : "Please select required options"}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
+        <div className="space-y-6 py-4 overflow-y-auto max-h-[60vh] flex-1 -mx-6 px-6">
           {modifiers.map((modifier) => (
             <div key={modifier.id} className="space-y-3">
               <Label className="text-base font-medium">{modifier.group_name_ko}</Label>
@@ -146,7 +146,7 @@ export function ModifierSelectionModal({
           {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="gap-2 shrink-0 border-t pt-4 mt-auto">
           <Button variant="outline" onClick={handleCancel}>
             {language === "ko" ? "취소" : "Cancel"}
           </Button>

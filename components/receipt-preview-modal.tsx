@@ -1,11 +1,22 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
 import { X, Printer } from "lucide-react"
+import { useMenuNameIndex } from "@/hooks/use-menu-name-index"
+import { pickLocalized, resolveOrderItemName } from "@/lib/item-name-localization"
 
 export interface ReceiptPreviewItem {
+  /**
+   * Fallback display name (the language-frozen string saved at order time).
+   * Prefer `menuId`/`names`, which let the receipt re-localize into the
+   * selected receipt language instead of showing the frozen text.
+   */
   name: string
+  /** Menu catalog id, used to look the item up in the live catalog. */
+  menuId?: string
+  /** Per-language names saved on the order, used when the menu was deleted. */
+  names?: Record<string, string | undefined>
   modifierText?: string
   quantity: number
   unitPrice: number
@@ -229,6 +240,26 @@ export default function ReceiptPreviewModal({
 
   const t = translations[receiptLanguage] || translations.ko
 
+  // Ordered item names are frozen at order time (usually Korean), so re-resolve
+  // them against the live menu catalog using the SELECTED RECEIPT LANGUAGE —
+  // deliberately not the admin/UI language.
+  const menuNameIndex = useMenuNameIndex(isOpen)
+  const localizedItems = useMemo(
+    () =>
+      items.map((item) => ({
+        ...item,
+        name:
+          resolveOrderItemName(
+            { menuId: item.menuId, name: item.names ?? item.name },
+            receiptLanguage,
+            menuNameIndex,
+          ) ||
+          pickLocalized(item.names as any, receiptLanguage) ||
+          item.name,
+      })),
+    [items, receiptLanguage, menuNameIndex],
+  )
+
   // 매장명이 비어있으면 기본값 사용
   const resolvedStoreName = storeName?.trim() || "LUNA Lounge & Bar"
 
@@ -319,7 +350,7 @@ export default function ReceiptPreviewModal({
 
             {/* Items */}
             <div className="space-y-2">
-              {items.map((item, index) => (
+              {localizedItems.map((item, index) => (
                 <div key={`${item.name}-${item.modifierText ?? ""}-${index}`}>
                   <div className="flex items-start justify-between gap-2">
                     <span className="flex-1 font-semibold text-pretty">{item.name}</span>

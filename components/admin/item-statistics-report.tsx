@@ -11,13 +11,21 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { BarChart3, Wine, Package, GlassWater } from "lucide-react"
+import { BarChart3, Wine, Package, GlassWater, FileSpreadsheet } from "lucide-react"
 import {
   shouldIncludeLine,
   resolveItemType,
   type StatLineItem,
   type StatItemType,
 } from "@/lib/stats-classification"
+import { adminTranslations, type AdminLanguage } from "@/lib/admin-translations"
+import {
+  buildMenuNameIndex,
+  resolveOrderItemName,
+  normalizeNameKey,
+  EMPTY_MENU_NAME_INDEX,
+  type MenuNameIndex,
+} from "@/lib/item-name-localization"
 
 type TabType = "daily" | "monthly"
 
@@ -27,28 +35,52 @@ interface RawLineItem extends StatLineItem {
 }
 
 interface AggregatedRow {
+  key: string
   name: string
   type: StatItemType
   quantity: number
 }
 
-const TYPE_LABEL: Record<StatItemType, string> = {
-  single: "단품",
-  combo_set: "콤보 세트",
-  combo_drink: "콤보 주류",
-}
-
+// Type labels are derived from the active language at render time, so they are
+// built inside the component (see `typeLabels`) rather than as a static map.
 const TYPE_ICON: Record<StatItemType, typeof Wine> = {
   single: GlassWater,
   combo_set: Package,
   combo_drink: Wine,
 }
 
-export default function ItemStatisticsReport() {
+export default function ItemStatisticsReport({
+  adminLanguage: adminLanguageProp,
+}: {
+  /** Passed down by the admin shell so the report re-localizes instantly. */
+  adminLanguage?: AdminLanguage
+} = {}) {
   const [activeTab, setActiveTab] = useState<TabType>("daily")
   const [rows, setRows] = useState<RawLineItem[]>([])
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  // Localized names from the live catalog, so item names are not frozen in the
+  // language they were saved in at order time.
+  const [menuNameIndex, setMenuNameIndex] = useState<MenuNameIndex>(EMPTY_MENU_NAME_INDEX)
+  // Fallback for standalone use; the prop wins whenever the shell supplies it.
+  const [storedLanguage, setStoredLanguage] = useState<AdminLanguage>("ko")
+  const adminLanguage = adminLanguageProp ?? storedLanguage
+  const t = adminTranslations[adminLanguage]
+
+  const typeLabels: Record<StatItemType, string> = useMemo(
+    () => ({
+      single: t.statTypeSingle,
+      combo_set: t.statTypeComboSet,
+      combo_drink: t.statTypeComboDrink,
+    }),
+    [t],
+  )
+
+  useEffect(() => {
+    if (adminLanguageProp) return
+    const saved = localStorage.getItem("adminLanguage") as AdminLanguage | null
+    if (saved && adminTranslations[saved]) setStoredLanguage(saved)
+  }, [adminLanguageProp])
 
   const [selectedDate, setSelectedDate] = useState(() => {
     return new Date().toISOString().split("T")[0] // YYYY-MM-DD
@@ -76,6 +108,8 @@ export default function ItemStatisticsReport() {
           if (item?.id != null) map[String(item.id)] = item.category
         }
         setCategoryMap(map)
+        // Same response also drives per-language name resolution (one request).
+        setMenuNameIndex(buildMenuNameIndex(items))
       } catch (err) {
         console.error("[v0] 카테고리 로드 중 오류:", err)
       }
@@ -121,28 +155,84 @@ export default function ItemStatisticsReport() {
     [categoryMap],
   )
 
-  // 필터 규칙 적용 후 항목명 기준 집계
+  // Resolve a stat line to a name in the active admin language.
+  // NOTE: on 'item' rows parent_menu_id IS the item's own menu id, but on
+  // 'combo_option' rows it points at the PARENT combo — passing it there would
+  // label every option with the combo's name, so those resolve by name instead.
+  const resolveLineName = useMemo(() => {
+    return (row: RawLineItem): string => {
+      const isComboOption = row.line_type === "combo_option"
+      const resolved = resolveOrderItemName(
+        {
+          menuId: isComboOption ? null : row.parent_menu_id,
+          nameKo: row.item_name_ko,
+          nameEn: row.item_name_en,
+        },
+        adminLanguage,
+        menuNameIndex,
+      )
+      return resolved || row.item_name_ko || row.item_name_en || t.statNoName
+    }
+  }, [adminLanguage, menuNameIndex, t])
+
+  // 필터 규칙 적용 후 항목 기준 집계.
+  // 버킷 키는 언어와 무관한 식별자(메뉴 ID 또는 정규화된 원본명)를 사용하므로
+  // 관리자 언어를 바꿔도 집계 그룹이 갈라지지 않는다.
   const aggregated = useMemo<AggregatedRow[]>(() => {
     const buckets = new Map<string, AggregatedRow>()
     for (const row of rows) {
       if (!shouldIncludeLine(row, categoryOf)) continue
-      const name = row.item_name_ko || row.item_name_en || "(이름 없음)"
       const type = resolveItemType(row, categoryOf)
-      const key = `${type}__${name}`
+      const identity =
+        row.line_type === "combo_option" || !row.parent_menu_id
+          ? normalizeNameKey(row.item_name_ko || row.item_name_en)
+          : String(row.parent_menu_id)
+      const key = `${type}__${identity}`
       const existing = buckets.get(key)
       if (existing) {
         existing.quantity += Number(row.quantity) || 0
       } else {
-        buckets.set(key, { name, type, quantity: Number(row.quantity) || 0 })
+        buckets.set(key, {
+          key,
+          name: resolveLineName(row),
+          type,
+          quantity: Number(row.quantity) || 0,
+        })
       }
     }
     return Array.from(buckets.values()).sort((a, b) => b.quantity - a.quantity)
-  }, [rows, categoryOf])
+  }, [rows, categoryOf, resolveLineName])
 
   const totalVolume = useMemo(
     () => aggregated.reduce((sum, r) => sum + r.quantity, 0),
     [aggregated],
   )
+
+  // Export the aggregated table, using the same localized names shown on screen.
+  const handleExportExcel = () => {
+    const escapeCsv = (value: string | number) => `"${String(value ?? "").replace(/"/g, '""')}"`
+    const headers = ["#", t.statItemName, t.statType, t.statQuantity]
+    const csvRows = aggregated.map((row, index) => [
+      String(index + 1),
+      row.name,
+      typeLabels[row.type],
+      String(row.quantity),
+    ])
+    // BOM so Excel reads UTF-8 (Korean/Vietnamese/Thai) correctly.
+    const csvContent =
+      "\uFEFF" + [headers, ...csvRows].map((r) => r.map(escapeCsv).join(",")).join("\r\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    const fileLabel = activeTab === "daily" ? selectedDate : selectedMonth
+    link.href = url
+    link.download = `item_statistics_${fileLabel}_${adminLanguage}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="space-y-6">
@@ -157,7 +247,7 @@ export default function ItemStatisticsReport() {
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            일별
+            {t.statDaily}
           </button>
           <button
             onClick={() => setActiveTab("monthly")}
@@ -167,7 +257,7 @@ export default function ItemStatisticsReport() {
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            월별
+            {t.statMonthly}
           </button>
         </div>
 
@@ -193,7 +283,7 @@ export default function ItemStatisticsReport() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              총 판매 수량 (음식/직원착석 제외)
+              {t.statTotalVolume}
             </CardTitle>
             <BarChart3 className="h-4 w-4 text-primary" />
           </CardHeader>
@@ -204,7 +294,7 @@ export default function ItemStatisticsReport() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              집계 품목 수
+              {t.statCountedItems}
             </CardTitle>
             <Package className="h-4 w-4 text-primary" />
           </CardHeader>
@@ -217,33 +307,41 @@ export default function ItemStatisticsReport() {
       {/* 품목별 통계 테이블 */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Wine className="h-5 w-5 text-primary" />
-            품목별 판매 수량
-          </CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle className="flex items-center gap-2">
+              <Wine className="h-5 w-5 text-primary" />
+              {t.statItemSalesVolume}
+            </CardTitle>
+            <button
+              onClick={handleExportExcel}
+              disabled={aggregated.length === 0}
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Excel
+            </button>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="py-12 text-center text-muted-foreground">불러오는 중...</p>
+            <p className="py-12 text-center text-muted-foreground">{t.loading}</p>
           ) : aggregated.length === 0 ? (
-            <p className="py-12 text-center text-muted-foreground">
-              해당 기간에 집계할 판매 데이터가 없습니다.
-            </p>
+            <p className="py-12 text-center text-muted-foreground">{t.statNoData}</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-12 text-center">#</TableHead>
-                  <TableHead>품목명</TableHead>
-                  <TableHead className="w-32">유형</TableHead>
-                  <TableHead className="w-28 text-right">판매 수량</TableHead>
+                  <TableHead>{t.statItemName}</TableHead>
+                  <TableHead className="w-32">{t.statType}</TableHead>
+                  <TableHead className="w-28 text-right">{t.statQuantity}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {aggregated.map((row, index) => {
                   const Icon = TYPE_ICON[row.type]
                   return (
-                    <TableRow key={`${row.type}-${row.name}`}>
+                    <TableRow key={row.key}>
                       <TableCell className="text-center text-muted-foreground">
                         {index + 1}
                       </TableCell>
@@ -251,7 +349,7 @@ export default function ItemStatisticsReport() {
                       <TableCell>
                         <Badge variant="secondary" className="gap-1 font-normal">
                           <Icon className="h-3 w-3" />
-                          {TYPE_LABEL[row.type]}
+                          {typeLabels[row.type]}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right font-semibold text-foreground">

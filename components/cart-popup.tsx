@@ -14,6 +14,8 @@ import BillConfigurationModal, { type BillConfiguration } from "@/components/bil
   import ReceiptVerificationModal from "@/components/receipt-verification-modal"
 import PriceAdjustmentModal from "@/components/price-adjustment-modal"
 import { getAdjustmentInfo } from "@/lib/manager-price"
+import { useMenuNameIndex } from "@/hooks/use-menu-name-index"
+import { collectInlineNames, resolveOrderItemName } from "@/lib/item-name-localization"
 
 // 언어 및 통화 타입 정의
 type Language = "ko" | "en" | "ja" | "zh" | "vi" | "hi"
@@ -387,18 +389,30 @@ export default function CartPopup({
     noOrders: "아직 주문 내역이 없습니다",
   }
 
+  // 실시간 메뉴 카탈로그 (영수증 이름 재번역용 — 미리보기/실제 출력 공용)
+  const menuNameIndex = useMenuNameIndex()
+
   const getMenuName = (item: CartItem | OrderHistoryItem): string => {
     const nameKey =
       `name${language === "ko" ? "Ko" : language === "en" ? "En" : language === "ja" ? "Ja" : language === "zh" ? "Zh" : language === "vi" ? "Vi" : language === "hi" ? "Hi" : "Ko"}` as keyof CartItem
     return (item[nameKey] as unknown as string) || item.nameKo || "메뉴"
   }
 
-  // 영수증 출력용 메뉴 이름 (선택된 영수증 언어 사용)
-  const getMenuNameForReceipt = (item: CartItem | OrderHistoryItem, receiptLang: string): string => {
-    const nameKey =
-      `name${receiptLang === "ko" ? "Ko" : receiptLang === "en" ? "En" : receiptLang === "ja" ? "Ja" : receiptLang === "zh" ? "Zh" : receiptLang === "vi" ? "Vi" : receiptLang === "hi" ? "Hi" : "Ko"}` as keyof CartItem
-    return (item[nameKey] as unknown as string) || item.nameKo || "메뉴"
-  }
+  // 영수증 출력용 메뉴 이름 (선택된 영수증 언어 사용).
+  // ★ 주문 시점에 저장된 이름은 특정 언어로 고정되어 있으므로, 실시간 메뉴 카탈로그에서
+  //   menuId(=item.id)로 다시 조회해 "선택된 영수증 언어"로 번역한다.
+  //   카탈로그에 없으면 저장된 언어별 필드 → 영어 → 한국어 순으로 폴백한다.
+  const getMenuNameForReceipt = useCallback(
+    (item: CartItem | OrderHistoryItem, receiptLang: string): string => {
+      const resolved = resolveOrderItemName(
+        { ...item, menuId: item.id != null ? String(item.id) : undefined, name: undefined },
+        receiptLang,
+        menuNameIndex,
+      )
+      return resolved || item.nameKo || "메뉴"
+    },
+    [menuNameIndex],
+  )
 
   // 금액 변환
   const convertAmount = (amount: number, sourceCurrency: string): number => {
@@ -471,8 +485,12 @@ export default function CartPopup({
     const sourceAmount = item.priceAmount ?? item.priceKRW ?? 0
     const unitPrice = convertAmount(sourceAmount, sourceCurrency)
     // 스태프 이름은 영수증에 표시하지 않으므로 modifierText 없음.
+    // ★ 이름은 여기서 확정하지 않는다: 영수증은 "선택된 영수증 언어"로 다시 번역해야 하므로
+    //   menuId와 언어별 원본 이름을 함께 넘기고, 최종 번역은 미리보기에서 수행한다.
     return {
       name: getMenuName(item),
+      menuId: item.id != null ? String(item.id) : undefined,
+      names: collectInlineNames(item),
       quantity: totalQty,
       unitPrice,
       lineTotal: unitPrice * totalQty,
@@ -674,7 +692,7 @@ export default function CartPopup({
     // 클립보드용 전체 주문서 텍스트 (재무 데이터 포함)
     const orderText = generateOrderText(cartSnapshot, tableSnapshot, cartTotalSnapshot)
     
-    // Telegram용 간결한 메시지 (가격 제외, 아이템명과 수량만)
+    // Telegram용 간결한 ���시지 (가격 제외, 아이템명과 수량만)
     const telegramMessage = generateTelegramMessage(cartSnapshot, tableSnapshot)
 
     // 7. 상태 업데이트의 안전한 지연 (300ms) - 터치 이벤트 완전 종�� 후 실행
@@ -1062,7 +1080,7 @@ export default function CartPopup({
   }, [orderHistoryTotal, mergedHistory, selectedTable, currency])
 
   // ============================================================
-  // STEP 4: 빌 설정 완료 -> 새 창 인쇄 + 확인 모�� ���시
+  // STEP 4: 빌 설정 ��료 -> 새 창 인쇄 + 확인 모�� ���시
   // ★ 완전 리팩토링: @media print CSS 방식 폐기, 격리된 인쇄 창 사용
   // ============================================================
   const handleBillConfigConfirm = useCallback(async (config: BillConfiguration) => {
