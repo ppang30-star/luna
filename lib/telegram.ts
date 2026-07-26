@@ -215,14 +215,20 @@ export const generateTelegramCancellationMessage = (payload: TelegramCancellatio
 
 // Send message to Telegram via our own Next.js API route (server-side proxy).
 // This avoids CORS issues that occur when calling the Telegram API directly from the browser.
-export const sendTelegramMessage = async (message: string): Promise<boolean> => {
+// `destination` selects the target Telegram chat on the server:
+//   - "order" (default): regular order/cancellation notifications chat
+//   - "receipt": dedicated final checkout receipt chat (TELEGRAM_RECEIPT_CHAT_ID)
+export const sendTelegramMessage = async (
+  message: string,
+  destination: "order" | "receipt" = "order",
+): Promise<boolean> => {
   try {
     const response = await fetch("/api/telegram", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ message })
+      body: JSON.stringify({ message, destination })
     })
 
     const data = await response.json().catch(() => null)
@@ -253,7 +259,8 @@ export const sendTelegramOrder = async (payload: TelegramOrderPayload): Promise<
 // Send RECEIPT notification to Telegram
 export const sendTelegramReceipt = async (payload: TelegramReceiptPayload): Promise<boolean> => {
   const message = generateTelegramReceiptMessage(payload)
-  return sendTelegramMessage(message)
+  // Final checkout receipt (sales settlement) -> dedicated receipt chat.
+  return sendTelegramMessage(message, "receipt")
 }
 
 // Send CANCELLATION notification to Telegram
