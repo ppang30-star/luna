@@ -5,10 +5,15 @@ import { NextResponse } from "next/server"
 const TELEGRAM_BOT_TOKEN = "8915994764:AAG9EL7kBCy5ob6g4KWs93EAPzN56x47uyc"
 const TELEGRAM_CHAT_ID = "-5034317914"
 
+// Final checkout receipts (sales settlement) go to a dedicated chat when configured.
+// Falls back to the regular order chat if TELEGRAM_RECEIPT_CHAT_ID is not set.
+const TELEGRAM_RECEIPT_CHAT_ID = process.env.TELEGRAM_RECEIPT_CHAT_ID || TELEGRAM_CHAT_ID
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
     const message: unknown = body?.message
+    const destination: unknown = body?.destination
 
     if (typeof message !== "string" || message.trim() === "") {
       return NextResponse.json(
@@ -16,6 +21,10 @@ export async function POST(request: Request) {
         { status: 400 }
       )
     }
+
+    // Route final checkout receipts to the dedicated receipt chat; everything
+    // else (orders, cancellations, misc) goes to the regular order chat.
+    const chatId = destination === "receipt" ? TELEGRAM_RECEIPT_CHAT_ID : TELEGRAM_CHAT_ID
 
     const response = await fetch(
       `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
@@ -25,7 +34,7 @@ export async function POST(request: Request) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          chat_id: TELEGRAM_CHAT_ID,
+          chat_id: chatId,
           text: message,
           parse_mode: "HTML",
         }),

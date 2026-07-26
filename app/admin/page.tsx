@@ -297,7 +297,7 @@ export default function AdminPage() {
                   <Link href="/admin/sales">
                     <Button variant="outline" className="gap-2">
                       <BarChart3 className="w-4 h-4" />
-                      매출 현황
+                      {t.navSalesReport}
                     </Button>
                   </Link>
                   <Link href="/">
@@ -341,8 +341,8 @@ export default function AdminPage() {
             <TabsList className={`grid w-full ${canWrite ? "grid-cols-10" : "grid-cols-9"}`}>
               <TabsTrigger value="menu">{t.menuManagement}</TabsTrigger>
               <TabsTrigger value="category">{t.categoryManagement}</TabsTrigger>
-              <TabsTrigger value="optionGroups">콤보 옵션</TabsTrigger>
-              <TabsTrigger value="itemStats">품목별 통계</TabsTrigger>
+              <TabsTrigger value="optionGroups">{t.navComboOptions}</TabsTrigger>
+              <TabsTrigger value="itemStats">{t.navItemStatistics}</TabsTrigger>
               <TabsTrigger value="promotion">{t.promotion}</TabsTrigger>
               <TabsTrigger value="exchange">{t.exchangeRate}</TabsTrigger>
               {canWrite && <TabsTrigger value="managers">{t.managers}</TabsTrigger>}
@@ -389,7 +389,7 @@ export default function AdminPage() {
             <TabsContent value="itemStats">
               <div className="space-y-4">
                 {mounted ? (
-                  <ItemStatisticsReport />
+                  <ItemStatisticsReport adminLanguage={adminLanguage} />
                 ) : (
                   <div className="p-8 text-center text-muted-foreground">Loading...</div>
                 )}

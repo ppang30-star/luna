@@ -6,6 +6,12 @@ import Link from "next/link"
 import DeleteConfirmationPopup from "@/components/delete-confirmation-popup"
 import { adminTranslations, type AdminLanguage } from "@/lib/admin-translations"
 import { adminFetch, getAdminRole } from "@/lib/admin-session"
+import {
+  fetchMenuNameIndex,
+  resolveOrderItemName,
+  EMPTY_MENU_NAME_INDEX,
+  type MenuNameIndex,
+} from "@/lib/item-name-localization"
 
 interface SalesRecord {
   id: number
@@ -15,6 +21,14 @@ interface SalesRecord {
     menuId: string
     nameKo: string
     nameEn?: string
+    // Older/newer writers may embed extra per-language names, or a single
+    // translation object. Both shapes are resolved at render time.
+    nameJa?: string
+    nameZh?: string
+    nameEs?: string
+    nameTh?: string
+    nameVi?: string
+    name?: string | Partial<Record<string, string>>
     quantity: number
     unitPrice: number
   }>
@@ -51,6 +65,8 @@ export default function SalesDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<SalesRecord | null>(null)
   const [adminLanguage, setAdminLanguage] = useState<AdminLanguage>("ko")
+  // Catalog index (by menu id + by name), used to translate item names on the fly.
+  const [menuNameIndex, setMenuNameIndex] = useState<MenuNameIndex>(EMPTY_MENU_NAME_INDEX)
   // RBAC: only super_admin may delete sales records. Resolved after mount so the
   // localStorage-backed role is available (avoids SSR/hydration mismatch).
   const [canWrite, setCanWrite] = useState(false)
@@ -77,6 +93,21 @@ export default function SalesDashboardPage() {
     }
     setCanWrite(getAdminRole() === "super_admin")
   }, [])
+
+  // Load the menu catalog once so item names can be localized dynamically.
+  useEffect(() => {
+    fetchMenuNameIndex().then(setMenuNameIndex)
+  }, [])
+
+  // Resolve a saved sales item to a name in the currently active admin language.
+  // Priority: embedded translation object -> menu catalog (by menuId) -> inline
+  // per-language field on the saved item. Each step falls back active -> en -> ko.
+  const resolveItemName = useMemo(
+    () =>
+      (item: SalesRecord["items"][number]): string =>
+        resolveOrderItemName(item as Record<string, any>, adminLanguage, menuNameIndex),
+    [adminLanguage, menuNameIndex],
+  )
 
   // Fetch sales data for the selected date/month
   useEffect(() => {
@@ -435,7 +466,7 @@ export default function SalesDashboardPage() {
                   <td>${formatTime(record.created_at)}</td>
                   <td>${record.table_no}</td>
                   <td class="items-list">${record.items.map(item => 
-                    `${item.nameKo || item.nameEn} x${item.quantity}`
+                    `${resolveItemName(item)} x${item.quantity}`
                   ).join(', ')}</td>
                   <td>${record.payment_method === 'cash' ? t.cash : t.card}</td>
                   <td class="text-right">${formatCurrency(record.subtotal)}</td>
@@ -507,7 +538,7 @@ export default function SalesDashboardPage() {
             formatTime(record.created_at),
             record.table_no,
             record.items
-              .map((item) => `${item.nameKo || item.nameEn} x${item.quantity}`)
+              .map((item) => `${resolveItemName(item)} x${item.quantity}`)
               .join(", "),
             record.payment_method === "cash" ? t.cash : t.card,
             String(record.subtotal),
@@ -755,7 +786,7 @@ export default function SalesDashboardPage() {
                             {record.items.map((item, idx) => (
                               <div key={idx} className="flex justify-between text-sm py-1">
                                 <span className="text-zinc-300">
-                                  {item.nameKo || item.nameEn} x {item.quantity}
+                                  {resolveItemName(item)} x {item.quantity}
                                 </span>
                                 <span className="text-zinc-400">
                                   {formatCurrency(item.unitPrice * item.quantity)}
